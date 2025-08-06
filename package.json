@@ -9,7 +9,12 @@
     "start": "bun run dist/index.js",
     "compile": "bun build src/index.ts --compile --outfile pgbun"
   },
-  "keywords": ["postgresql", "connection-pool", "proxy", "bun"],
+  "keywords": [
+    "postgresql",
+    "connection-pool",
+    "proxy",
+    "bun"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -17,5 +22,8 @@
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
   }
 }
