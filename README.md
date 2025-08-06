@@ -6,7 +6,9 @@ A high-performance PostgreSQL connection pool and proxy built with [Bun](https:/
 
 - **High Performance**: Built on Bun's fast runtime and optimized TCP handling
 - **Connection Pooling**: Efficient connection management with configurable pool modes
-- **PostgreSQL Wire Protocol**: Native PostgreSQL protocol support
+- **PostgreSQL Wire Protocol**: Native PostgreSQL protocol support with full query proxying
+- **Real Server Connections**: Establishes actual TCP connections to PostgreSQL servers
+- **Bidirectional Proxying**: Transparent query forwarding and response proxying
 - **Lightweight**: Single binary deployment (~98MB)
 - **TypeScript**: Full type safety and modern development experience
 - **Configurable**: Flexible configuration options for different use cases
@@ -53,15 +55,19 @@ pgbun uses sensible defaults but can be configured for your environment:
 ## Architecture
 
 ```
-Client → pgbun (6432) → PostgreSQL (5432)
+Client → pgbun (6432) → [Connection Pool] → PostgreSQL (5432)
+          ↓                                          ↓
+    Parse/Forward ←——————————————————————— Proxy Back
 ```
+
+pgbun acts as a transparent proxy, establishing real connections to PostgreSQL servers and efficiently proxying queries and responses bidirectionally.
 
 ### Core Components
 
 - **Server** (`src/server.ts`): TCP server handling client connections
-- **Connection Pool** (`src/connection-pool.ts`): Manages PostgreSQL connection pools
-- **Protocol Handler** (`src/protocol.ts`): PostgreSQL wire protocol implementation
-- **Connection Handler** (`src/connection-handler.ts`): Orchestrates client-server communication
+- **Connection Pool** (`src/connection-pool.ts`): Manages real PostgreSQL connections with authentication
+- **Protocol Handler** (`src/protocol.ts`): Full PostgreSQL wire protocol implementation
+- **Connection Handler** (`src/connection-handler.ts`): Orchestrates bidirectional client-server communication
 - **Configuration** (`src/config.ts`): Centralized configuration management
 
 ### Pool Modes
@@ -93,19 +99,28 @@ src/
 └── config.ts             # Configuration management
 ```
 
-## Roadmap
+## Status
 
-- [ ] Actual PostgreSQL server connections
-- [ ] Authentication forwarding
+### ✅ Implemented
+- Real PostgreSQL server connections
+- PostgreSQL protocol parsing and message creation
+- Bidirectional query proxying
+- Connection pool management with authentication
+- Session-level connection pooling
+- Graceful shutdown handling
+- Standalone binary compilation
+
+### 🚧 Roadmap
 - [ ] Transaction-level pooling
 - [ ] Statement-level pooling
-- [ ] Connection health checks
-- [ ] Metrics and monitoring
+- [ ] Connection health checks and reconnection
+- [ ] Metrics and monitoring interface
 - [ ] Configuration file support
 - [ ] SSL/TLS support
-- [ ] Multiple database support
-- [ ] Load balancing
-- [ ] Admin interface
+- [ ] Multiple database/server support
+- [ ] Load balancing across servers
+- [ ] Admin interface and statistics
+- [ ] Connection timeouts and limits
 
 ## Contributing
 

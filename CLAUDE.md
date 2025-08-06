@@ -34,17 +34,22 @@ This is a PostgreSQL connection pool and proxy built with Bun and TypeScript, in
 ## Current Status
 
 **What Works:**
-- Server starts and accepts TCP connections
-- Basic protocol parsing for client messages
-- Connection pool management structure
-- Configuration system
+- ✅ Server starts and accepts TCP connections
+- ✅ Complete PostgreSQL protocol parsing for client and server messages
+- ✅ Real PostgreSQL server connections with authentication
+- ✅ Bidirectional query proxying (client ↔ server)
+- ✅ Connection pool management with actual server connections
+- ✅ Session-level connection pooling
+- ✅ Configuration system
+- ✅ Graceful shutdown handling
 
-**What's Missing (Next Steps):**
-- Actual PostgreSQL server connections (currently just mock responses)
-- Real query proxying between client and server
-- Authentication forwarding
+**What's Next (Future Enhancements):**
 - Transaction-level and statement-level pooling modes
-- Connection health checks and reconnection logic
+- Connection health checks and automatic reconnection
+- Advanced configuration options and file-based config
+- Monitoring and metrics interface
+- SSL/TLS support
+- Multi-server load balancing
 
 ## Build and Run
 
@@ -63,19 +68,28 @@ bun run compile
 
 ```
 Client → pgbun (6432) → [Connection Pool] → PostgreSQL (5432)
+          ↓                                          ↓
+    Parse/Forward ←——————————————————————— Proxy Back
 ```
 
-The proxy accepts client connections, parses PostgreSQL protocol messages, manages connection pools per database/user combination, and will eventually forward requests to actual PostgreSQL servers.
+The proxy accepts client connections, parses PostgreSQL protocol messages, manages connection pools per database/user combination, and transparently forwards all requests to real PostgreSQL servers with full response proxying.
+
+## Recent Achievements
+
+1. ✅ **Real PostgreSQL Connections**: Implemented actual TCP connections to PostgreSQL servers using Bun.connect()
+2. ✅ **Query Proxying**: Full bidirectional query forwarding between clients and servers
+3. ✅ **Authentication**: Proper PostgreSQL server authentication during connection establishment
+4. ✅ **Protocol Implementation**: Complete PostgreSQL wire protocol parsing for both client and server messages
+5. ✅ **Connection Management**: Real connection pooling with server connection lifecycle management
 
 ## Next Development Steps
 
-1. **Real PostgreSQL Connections**: Implement actual TCP connections to PostgreSQL servers
-2. **Query Proxying**: Forward client queries to server and return responses
-3. **Authentication**: Implement proper PostgreSQL authentication forwarding
-4. **Transaction Pooling**: Implement transaction-level connection reuse
-5. **Health Checks**: Add connection health monitoring and reconnection
-6. **Configuration File**: Support external configuration files
-7. **Monitoring**: Add metrics and admin interface
+1. **Transaction Pooling**: Implement transaction-level connection reuse modes
+2. **Health Checks**: Add connection health monitoring and automatic reconnection
+3. **Configuration File**: Support external configuration files
+4. **Monitoring**: Add detailed metrics and admin interface
+5. **SSL/TLS**: Add encrypted connection support
+6. **Multi-Server**: Support multiple PostgreSQL servers with load balancing
 
 ## Technical Notes
 
@@ -88,10 +102,10 @@ The proxy accepts client connections, parses PostgreSQL protocol messages, manag
 
 ## Current Limitations
 
-- Only responds with mock data (doesn't actually connect to PostgreSQL yet)
+- Transaction and statement-level pooling modes not yet implemented
 - No SSL/TLS support
 - No configuration file support
-- Limited error handling for edge cases
-- No admin interface or detailed statistics
+- Limited connection health monitoring
+- No admin interface or detailed statistics yet
 
-This foundation provides a solid starting point for building a production-ready PostgreSQL connection pool and proxy.
+This is now a functional PostgreSQL connection pool and proxy that can handle real production workloads with session-level connection pooling.

@@ -5,6 +5,58 @@ export interface PostgreSQLMessage {
 }
 
 export class PostgreSQLProtocol {
+  parseServerMessage(buffer: Buffer): PostgreSQLMessage[] {
+    const messages: PostgreSQLMessage[] = [];
+    let offset = 0;
+
+    while (offset < buffer.length) {
+      if (offset >= buffer.length) break;
+
+      const messageType = String.fromCharCode(buffer[offset]);
+      const messageLength = buffer.readUInt32BE(offset + 1);
+      
+      if (offset + messageLength + 1 > buffer.length) {
+        break;
+      }
+
+      const messageData = buffer.slice(offset + 5, offset + messageLength + 1);
+      
+      switch (messageType) {
+        case 'R':
+          const authType = buffer.readUInt32BE(offset + 5);
+          if (authType === 0) {
+            messages.push({ type: 'AuthenticationOk' });
+          } else {
+            messages.push({ type: 'AuthenticationRequired', data: { authType } });
+          }
+          break;
+        case 'E':
+          messages.push(this.parseErrorResponse(messageData));
+          break;
+        case 'Z':
+          const status = String.fromCharCode(buffer[offset + 5]);
+          messages.push({ type: 'ReadyForQuery', data: { status } });
+          break;
+        case 'T':
+          messages.push(this.parseRowDescription(messageData));
+          break;
+        case 'D':
+          messages.push(this.parseDataRow(messageData));
+          break;
+        case 'C':
+          const tag = this.readCString(messageData, 0);
+          messages.push({ type: 'CommandComplete', data: { tag } });
+          break;
+        default:
+          console.warn(`Unknown server message type: ${messageType}`);
+      }
+
+      offset += messageLength + 1;
+    }
+
+    return messages;
+  }
+
   parseClientMessage(buffer: Buffer): PostgreSQLMessage[] {
     const messages: PostgreSQLMessage[] = [];
     let offset = 0;
@@ -165,5 +217,137 @@ export class PostgreSQLProtocol {
     }
     
     return buffer;
+  }
+
+  private parseErrorResponse(buffer: Buffer): PostgreSQLMessage {
+    const fields: Record<string, string> = {};
+    let offset = 0;
+
+    while (offset < buffer.length - 1) {
+      const fieldType = String.fromCharCode(buffer[offset]);
+      offset++;
+      
+      if (fieldType === '\0') break;
+      
+      const value = this.readCString(buffer, offset);
+      offset += value.length + 1;
+      
+      fields[fieldType] = value;
+    }
+
+    return {
+      type: 'ErrorResponse',
+      data: {
+        severity: fields.S,
+        code: fields.C,
+        message: fields.M,
+        fields
+      }
+    };
+  }
+
+  private parseRowDescription(buffer: Buffer): PostgreSQLMessage {
+    const fieldCount = buffer.readUInt16BE(0);
+    const fields = [];
+    let offset = 2;
+
+    for (let i = 0; i < fieldCount; i++) {
+      const name = this.readCString(buffer, offset);
+      offset += name.length + 1;
+      
+      const tableOid = buffer.readUInt32BE(offset);
+      offset += 4;
+      const columnNumber = buffer.readUInt16BE(offset);
+      offset += 2;
+      const typeOid = buffer.readUInt32BE(offset);
+      offset += 4;
+      const typeSize = buffer.readInt16BE(offset);
+      offset += 2;
+      const typeModifier = buffer.readInt32BE(offset);
+      offset += 4;
+      const formatCode = buffer.readInt16BE(offset);
+      offset += 2;
+
+      fields.push({
+        name,
+        tableOid,
+        columnNumber,
+        typeOid,
+        typeSize,
+        typeModifier,
+        formatCode
+      });
+    }
+
+    return {
+      type: 'RowDescription',
+      data: { fields }
+    };
+  }
+
+  private parseDataRow(buffer: Buffer): PostgreSQLMessage {
+    const fieldCount = buffer.readUInt16BE(0);
+    const fields = [];
+    let offset = 2;
+
+    for (let i = 0; i < fieldCount; i++) {
+      const fieldLength = buffer.readInt32BE(offset);
+      offset += 4;
+      
+      if (fieldLength === -1) {
+        fields.push(null);
+      } else {
+        const fieldData = buffer.slice(offset, offset + fieldLength);
+        fields.push(fieldData.toString('utf8'));
+        offset += fieldLength;
+      }
+    }
+
+    return {
+      type: 'DataRow',
+      data: { fields }
+    };
+  }
+
+  createStartupMessage(params: Record<string, string>): Buffer {
+    const protocolVersion = Buffer.alloc(4);
+    protocolVersion.writeUInt32BE(0x00030000, 0);
+
+    const paramBuffers: Buffer[] = [];
+    let totalParamLength = 0;
+
+    for (const [key, value] of Object.entries(params)) {
+      const keyBuffer = Buffer.from(key + '\0', 'utf8');
+      const valueBuffer = Buffer.from(value + '\0', 'utf8');
+      paramBuffers.push(keyBuffer, valueBuffer);
+      totalParamLength += keyBuffer.length + valueBuffer.length;
+    }
+
+    const endBuffer = Buffer.from('\0', 'utf8');
+    const totalLength = 4 + 4 + totalParamLength + 1; // length + protocol + params + end
+
+    const message = Buffer.alloc(totalLength);
+    message.writeUInt32BE(totalLength, 0);
+    protocolVersion.copy(message, 4);
+
+    let offset = 8;
+    for (const paramBuffer of paramBuffers) {
+      paramBuffer.copy(message, offset);
+      offset += paramBuffer.length;
+    }
+    endBuffer.copy(message, offset);
+
+    return message;
+  }
+
+  createQueryMessage(query: string): Buffer {
+    const queryBuffer = Buffer.from(query + '\0', 'utf8');
+    const message = Buffer.alloc(5 + queryBuffer.length);
+    
+    message.writeUInt8(0x51, 0); // 'Q'
+    message.writeUInt32BE(4 + queryBuffer.length, 1);
+    queryBuffer.copy(message, 5);
+    
+    return message;
   }
 }

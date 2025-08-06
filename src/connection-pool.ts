@@ -1,22 +1,27 @@
+import { Socket } from "bun";
 import { Config } from "./config";
+import { PostgreSQLProtocol } from "./protocol";
 
 export interface ServerConnection {
   id: string;
-  socket?: any;
+  socket?: Socket;
   database: string;
   user: string;
   inUse: boolean;
   createdAt: Date;
   lastUsed: Date;
+  authenticated: boolean;
 }
 
 export class ConnectionPool {
   private config: Config;
   private pools = new Map<string, ServerConnection[]>();
   private totalConnections = 0;
+  private protocol: PostgreSQLProtocol;
 
   constructor(config: Config) {
     this.config = config;
+    this.protocol = new PostgreSQLProtocol();
   }
 
   private getPoolKey(database: string, user: string): string {
@@ -65,16 +70,98 @@ export class ConnectionPool {
     
     console.log(`Creating new connection ${connectionId} for ${user}@${database}`);
 
-    const connection: ServerConnection = {
-      id: connectionId,
-      database,
-      user,
-      inUse: false,
-      createdAt: new Date(),
-      lastUsed: new Date(),
-    };
+    try {
+      const socket = await Bun.connect({
+        hostname: this.config.serverHost,
+        port: this.config.serverPort,
+        socket: {
+          data: () => {}, // Will be handled per connection
+          open: () => {},
+          close: () => {},
+          error: (socket, error) => {
+            console.error(`Server connection error for ${connectionId}:`, error);
+          }
+        }
+      });
 
-    return connection;
+      const connection: ServerConnection = {
+        id: connectionId,
+        socket,
+        database,
+        user,
+        inUse: false,
+        createdAt: new Date(),
+        lastUsed: new Date(),
+        authenticated: false,
+      };
+
+      // Authenticate with PostgreSQL server
+      await this.authenticateServerConnection(connection);
+
+      return connection;
+    } catch (error) {
+      console.error(`Failed to create connection ${connectionId}:`, error);
+      return null;
+    }
+  }
+
+  private async authenticateServerConnection(connection: ServerConnection): Promise<void> {
+    if (!connection.socket) {
+      throw new Error('No socket for server connection');
+    }
+
+    return new Promise((resolve, reject) => {
+      let authenticated = false;
+      const authTimeout = setTimeout(() => {
+        if (!authenticated) {
+          reject(new Error('Authentication timeout'));
+        }
+      }, 5000);
+
+      // Handle server messages during authentication
+      connection.socket.data = (socket: Socket, data: Buffer) => {
+        try {
+          console.log(`Received server data during auth for ${connection.id}: ${data.length} bytes`);
+          const messages = this.protocol.parseServerMessage(data);
+          console.log(`Parsed ${messages.length} messages:`, messages.map(m => m.type));
+          for (const message of messages) {
+            if (message.type === 'AuthenticationOk') {
+              authenticated = true;
+              connection.authenticated = true;
+              clearTimeout(authTimeout);
+              
+              // Reset socket handlers for normal operation
+              connection.socket.data = () => {}; // Will be overridden when connection is used
+              connection.socket.close = () => {
+                console.log(`Server connection ${connection.id} closed`);
+              };
+              connection.socket.error = (socket: Socket, error: Error) => {
+                console.error(`Server connection ${connection.id} error:`, error);
+              };
+              
+              resolve();
+            } else if (message.type === 'ErrorResponse') {
+              clearTimeout(authTimeout);
+              reject(new Error(`Authentication failed: ${message.data?.message || 'Unknown error'}`));
+            } else if (message.type === 'ReadyForQuery') {
+              // Ignore ReadyForQuery during auth - we'll handle this in normal operation
+            }
+          }
+        } catch (error) {
+          clearTimeout(authTimeout);
+          reject(error);
+        }
+      };
+
+      // Send startup message to PostgreSQL server
+      const startupMessage = this.protocol.createStartupMessage({
+        user: connection.user,
+        database: connection.database
+      });
+      
+      console.log(`Sending startup message to server for ${connection.user}@${connection.database}`);
+      connection.socket.write(startupMessage);
+    });
   }
 
   async shutdown(): Promise<void> {

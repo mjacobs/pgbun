@@ -69,33 +69,77 @@ export class ConnectionHandler {
   }
 
   private async handleStartup(session: ClientSession, message: any): Promise<void> {
-    session.database = message.database || 'postgres';
-    session.user = message.user || 'postgres';
+    session.database = message.data.database || 'postgres';
+    session.user = message.data.user || 'postgres';
     
-    const serverConnection = await this.connectionPool.getConnection(
-      session.database,
-      session.user
-    );
-    
-    if (serverConnection) {
-      session.serverConnection = serverConnection;
-      session.socket.write(this.protocol.createAuthenticationOk());
-      session.socket.write(this.protocol.createReadyForQuery());
-    } else {
-      session.socket.write(this.protocol.createErrorResponse('Connection pool exhausted'));
+    try {
+      const serverConnection = await this.connectionPool.getConnection(
+        session.database,
+        session.user
+      );
+      
+      if (serverConnection) {
+        session.serverConnection = serverConnection;
+        
+        // Set up bidirectional proxying
+        this.setupServerToClientProxy(session, serverConnection);
+        
+        // Send authentication success to client
+        session.socket.write(this.protocol.createAuthenticationOk());
+        session.socket.write(this.protocol.createReadyForQuery());
+        
+        console.log(`Client connected: ${session.user}@${session.database}`);
+      } else {
+        session.socket.write(this.protocol.createErrorResponse('Connection pool exhausted'));
+        session.socket.end();
+      }
+    } catch (error) {
+      console.error('Failed to establish server connection:', error);
+      session.socket.write(this.protocol.createErrorResponse('Failed to connect to database'));
       session.socket.end();
     }
   }
 
   private async handleQuery(session: ClientSession, message: any): Promise<void> {
-    if (!session.serverConnection) {
+    if (!session.serverConnection || !session.serverConnection.socket) {
       session.socket.write(this.protocol.createErrorResponse('No server connection'));
       return;
     }
 
-    console.log(`Proxying query: ${message.query}`);
-    session.socket.write(this.protocol.createCommandComplete('SELECT 1'));
-    session.socket.write(this.protocol.createReadyForQuery());
+    console.log(`Proxying query: ${message.data.query}`);
+    
+    // Create query message and send to PostgreSQL server
+    const queryMessage = this.protocol.createQueryMessage(message.data.query);
+    session.serverConnection.socket.write(queryMessage);
+  }
+
+  private setupServerToClientProxy(session: ClientSession, serverConnection: any): void {
+    if (!serverConnection.socket) return;
+
+    // Set up server data handler to proxy responses back to client
+    serverConnection.socket.data = (socket: any, data: Buffer) => {
+      try {
+        // For now, just proxy raw data back to client
+        // In a more sophisticated implementation, we might parse and modify messages
+        session.socket.write(data);
+      } catch (error) {
+        console.error('Error proxying server data to client:', error);
+        session.socket.end();
+      }
+    };
+
+    // Handle server connection close
+    serverConnection.socket.close = () => {
+      console.log(`Server connection closed for ${session.user}@${session.database}`);
+      session.socket.end();
+    };
+
+    // Handle server connection errors
+    serverConnection.socket.error = (socket: any, error: Error) => {
+      console.error('Server connection error:', error);
+      session.socket.write(this.protocol.createErrorResponse('Server connection error'));
+      session.socket.end();
+    };
   }
 }
 
