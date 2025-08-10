@@ -1,5 +1,5 @@
 import { Socket } from "bun";
-import { Config } from "./config";
+import { Config, SSLMode } from "./config";
 import { PostgreSQLProtocol } from "./protocol";
 
 export interface ServerConnection {
@@ -71,18 +71,11 @@ export class ConnectionPool {
     console.log(`Creating new connection ${connectionId} for ${user}@${database}`);
 
     try {
-      const socket = await Bun.connect({
-        hostname: this.config.serverHost,
-        port: this.config.serverPort,
-        socket: {
-          data: () => {}, // Will be handled per connection
-          open: () => {},
-          close: () => {},
-          error: (socket, error) => {
-            console.error(`Server connection error for ${connectionId}:`, error);
-          }
-        }
-      });
+      const socket = await this.connectWithSSL(this.config.serverTlsMode);
+
+      if (!socket) {
+        throw new Error("Failed to establish socket connection.");
+      }
 
       const connection: ServerConnection = {
         id: connectionId,
@@ -103,6 +96,78 @@ export class ConnectionPool {
       console.error(`Failed to create connection ${connectionId}:`, error);
       return null;
     }
+  }
+
+  private async connectWithSSL(mode: SSLMode): Promise<Socket | null> {
+    const hostDetails = {
+      hostname: this.config.serverHost,
+      port: this.config.serverPort,
+    };
+
+    const emptyHandlers = {
+      data: () => {},
+      open: () => {},
+      close: () => {},
+      error: () => {},
+    };
+
+    if (mode === 'disable') {
+      console.log('Connecting to server with SSL disabled.');
+      return Bun.connect({ ...hostDetails, socket: emptyHandlers });
+    }
+
+    const socket = await Bun.connect({ ...hostDetails, socket: emptyHandlers });
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        socket.end();
+        reject(new Error('SSLRequest timeout'));
+      }, 5000);
+
+      socket.data = (sock: Socket, data: Buffer) => {
+        clearTimeout(timeout);
+        // Clean up the temporary handler
+        sock.data = emptyHandlers.data;
+
+        if (data.toString() === 'S') {
+          console.log("Server accepted SSL request. Upgrading connection...");
+          const tlsOptions: Bun.TLS.Options = {};
+
+          if (this.config.serverTlsCaFile) {
+            tlsOptions.ca = Bun.file(this.config.serverTlsCaFile);
+          }
+          if (this.config.serverTlsKeyFile) {
+            tlsOptions.key = Bun.file(this.config.serverTlsKeyFile);
+          }
+          if (this.config.serverTlsCertFile) {
+            tlsOptions.cert = Bun.file(this.config.serverTlsCertFile);
+          }
+
+          if (mode === 'verify-full') {
+            tlsOptions.serverName = this.config.serverHost;
+          }
+
+          try {
+            sock.upgradeTLS(tlsOptions);
+            resolve(sock);
+          } catch (e) {
+            reject(e);
+          }
+        } else if (data.toString() === 'N') {
+          if (mode === 'prefer' || mode === 'allow') {
+            console.log("Server refused SSL, proceeding with non-TLS connection.");
+            resolve(sock);
+          } else {
+            reject(new Error(`Server refused SSL connection, but mode is '${mode}'`));
+          }
+        } else {
+          reject(new Error('Invalid response to SSLRequest'));
+        }
+      };
+
+      const sslRequest = this.protocol.createSSLRequestMessage();
+      socket.write(sslRequest);
+    });
   }
 
   private async authenticateServerConnection(connection: ServerConnection): Promise<void> {

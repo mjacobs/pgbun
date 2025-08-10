@@ -1,6 +1,6 @@
 import { Socket } from "bun";
 import { Config } from "./config";
-import { ConnectionPool } from "./connection-pool";
+import { ConnectionPool, ServerConnection } from "./connection-pool";
 import { PostgreSQLProtocol } from "./protocol";
 
 export class ConnectionHandler {
@@ -24,6 +24,66 @@ export class ConnectionHandler {
     const session = this.clientSessions.get(socket);
     if (!session) return;
 
+    if (session.state === 'new') {
+      if (this.protocol.isSSLRequest(data)) {
+        this.handleSSLRequest(session);
+      } else {
+        const mode = this.config.clientTlsMode;
+        if (mode === 'require' || mode === 'verify-ca' || mode === 'verify-full') {
+          console.error("Client attempted non-TLS connection, but TLS is required.");
+          const errorResponse = this.protocol.createErrorResponse('Server requires TLS');
+          socket.write(errorResponse);
+          socket.end();
+          return;
+        }
+        // If not SSLRequest, proceed with regular startup
+        this.processData(session, data);
+      }
+    } else {
+      this.processData(session, data);
+    }
+  }
+
+  private handleSSLRequest(session: ClientSession): void {
+    const mode = this.config.clientTlsMode;
+    const socket = session.socket;
+
+    if (mode === 'disable') {
+      console.log("Client requested SSL, but it's disabled. Rejecting.");
+      socket.write('N');
+      socket.end();
+      return;
+    }
+
+    const tlsOptions: Bun.TLS.Options = {};
+    if (this.config.clientTlsKeyFile && this.config.clientTlsCertFile) {
+        tlsOptions.key = Bun.file(this.config.clientTlsKeyFile);
+        tlsOptions.cert = Bun.file(this.config.clientTlsCertFile);
+    } else {
+        console.error("TLS mode is enabled, but key/cert files are not configured.");
+        socket.end();
+        return;
+    }
+
+    if ((mode === 'verify-ca' || mode === 'verify-full') && this.config.clientTlsCaFile) {
+        tlsOptions.ca = Bun.file(this.config.clientTlsCaFile);
+    } else if (mode === 'verify-ca' || mode === 'verify-full') {
+        console.error("TLS verify mode enabled, but CA file is not configured.");
+        socket.end();
+        return;
+    }
+
+    try {
+      socket.write('S');
+      socket.upgradeTLS(tlsOptions);
+      session.state = 'authenticating';
+    } catch (e) {
+      console.error("Failed to upgrade to TLS:", e);
+      socket.end();
+    }
+  }
+
+  private processData(session: ClientSession, data: Buffer): void {
     try {
       const messages = this.protocol.parseClientMessage(data);
       for (const message of messages) {
@@ -31,7 +91,7 @@ export class ConnectionHandler {
       }
     } catch (error) {
       console.error('Error parsing client message:', error);
-      socket.end();
+      session.socket.end();
     }
   }
 
@@ -71,6 +131,7 @@ export class ConnectionHandler {
   private async handleStartup(session: ClientSession, message: any): Promise<void> {
     session.database = message.data.database || 'postgres';
     session.user = message.data.user || 'postgres';
+    session.state = 'authenticating';
     
     try {
       const serverConnection = await this.connectionPool.getConnection(
@@ -87,6 +148,7 @@ export class ConnectionHandler {
         // Send authentication success to client
         session.socket.write(this.protocol.createAuthenticationOk());
         session.socket.write(this.protocol.createReadyForQuery());
+        session.state = 'active';
         
         console.log(`Client connected: ${session.user}@${session.database}`);
       } else {
@@ -147,7 +209,8 @@ class ClientSession {
   socket: Socket;
   database?: string;
   user?: string;
-  serverConnection?: any;
+  serverConnection?: ServerConnection;
+  state: 'new' | 'authenticating' | 'active' = 'new';
 
   constructor(socket: Socket) {
     this.socket = socket;

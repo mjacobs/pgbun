@@ -1,3 +1,5 @@
+export type SSLMode = 'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full';
+
 export interface ServerConfig {
   listen_port: number;
   listen_host: string;
@@ -17,6 +19,16 @@ export interface ServerConfig {
   log_disconnections: boolean;
   log_pooler_errors: boolean;
   stats_period: number;
+
+  // TLS settings
+  client_tls_mode: SSLMode;
+  client_tls_key_file?: string;
+  client_tls_cert_file?: string;
+  client_tls_ca_file?: string;
+  server_tls_mode: SSLMode;
+  server_tls_key_file?: string;
+  server_tls_cert_file?: string;
+  server_tls_ca_file?: string;
 }
 
 export class Config {
@@ -42,6 +54,8 @@ export class Config {
       log_disconnections: true,
       log_pooler_errors: true,
       stats_period: 60000,
+      client_tls_mode: 'disable',
+      server_tls_mode: 'prefer',
       ...config
     };
   }
@@ -84,5 +98,38 @@ export class Config {
 
   get logDisconnections(): boolean {
     return this.config.log_disconnections;
+  }
+
+  // TLS getters
+  get clientTlsMode(): SSLMode {
+    return this.config.client_tls_mode;
+  }
+
+  get clientTlsKeyFile(): string | undefined {
+    return this.config.client_tls_key_file;
+  }
+
+  get clientTlsCertFile(): string | undefined {
+    return this.config.client_tls_cert_file;
+  }
+
+  get clientTlsCaFile(): string | undefined {
+    return this.config.client_tls_ca_file;
+  }
+
+  get serverTlsMode(): SSLMode {
+    return this.config.server_tls_mode;
+  }
+
+  get serverTlsKeyFile(): string | undefined {
+    return this.config.server_tls_key_file;
+  }
+
+  get serverTlsCertFile(): string | undefined {
+    return this.config.server_tls_cert_file;
+  }
+
+  get serverTlsCaFile(): string | undefined {
+    return this.config.server_tls_ca_file;
   }
 }
