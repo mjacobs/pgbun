@@ -6,7 +6,7 @@ export class Server {
   private server?: TCPSocketListener;
   private config: Config;
   private connectionHandler: ConnectionHandler;
-  private activeConnections = new Set<Socket>();
+  private activeConnections = new Set<Socket<unknown>>();
 
   constructor(config: Config) {
     this.config = config;
@@ -37,39 +37,39 @@ export class Server {
     }
 
     for (const connection of this.activeConnections) {
-      connection.end();
+      (connection as Socket).end();
     }
     this.activeConnections.clear();
 
     await this.connectionHandler.shutdown();
   }
 
-  private handleConnection(socket: Socket): void {
-    this.activeConnections.add(socket);
+  private handleConnection(socket: Socket<unknown>): void {
+    this.activeConnections.add(socket as Socket);
     
     if (this.config.logConnections) {
       console.log(`New client connection from ${socket.remoteAddress}`);
     }
 
-    this.connectionHandler.handleClient(socket);
+    this.connectionHandler.handleClient(socket as Socket);
   }
 
-  private handleData(socket: Socket, data: Buffer): void {
-    this.connectionHandler.handleClientData(socket, data);
+  private handleData(socket: Socket<unknown>, data: Buffer): void {
+    this.connectionHandler.handleClientData(socket as Socket, data);
   }
 
-  private handleClose(socket: Socket): void {
-    this.activeConnections.delete(socket);
+  private handleClose(socket: Socket<unknown>): void {
+    this.activeConnections.delete(socket as Socket);
     
     if (this.config.logDisconnections) {
       console.log(`Client disconnected: ${socket.remoteAddress}`);
     }
 
-    this.connectionHandler.handleClientClose(socket);
+    this.connectionHandler.handleClientClose(socket as Socket);
   }
 
-  private handleError(socket: Socket, error: Error): void {
+  private handleError(socket: Socket<unknown>, error: Error): void {
     console.error(`Connection error for ${socket.remoteAddress}:`, error);
-    this.connectionHandler.handleClientError(socket, error);
+    this.connectionHandler.handleClientError(socket as Socket, error);
   }
 }

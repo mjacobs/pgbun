@@ -6,6 +6,7 @@ A high-performance PostgreSQL connection pool and proxy built with [Bun](https:/
 
 - **High Performance**: Built on Bun's fast runtime and optimized TCP handling
 - **Connection Pooling**: Efficient connection management with configurable pool modes
+- **Connection Timeouts**: PgBouncer-compatible timeout settings for robust connection management
 - **PostgreSQL Wire Protocol**: Native PostgreSQL protocol support with full query proxying
 - **Real Server Connections**: Establishes actual TCP connections to PostgreSQL servers
 - **Bidirectional Proxying**: Transparent query forwarding and response proxying
@@ -51,6 +52,31 @@ pgbun uses sensible defaults but can be configured for your environment:
 - **Pool Mode**: session (default)
 - **Max Connections**: 100 (default)
 - **Pool Size**: 25 (default)
+
+### Connection Timeouts
+
+pgbun includes PgBouncer-compatible connection timeout settings:
+
+- **server_connect_timeout**: 15 seconds - Maximum time to wait when connecting to PostgreSQL
+- **client_login_timeout**: 60 seconds - Maximum time to wait for client authentication  
+- **server_idle_timeout**: 10 minutes - Cleanup idle PostgreSQL connections after this time
+- **client_idle_timeout**: disabled - Cleanup idle client connections (0 = disabled)
+
+Example with custom timeouts:
+
+```typescript
+import { Config, Server } from 'pgbun';
+
+const config = new Config({
+  server_connect_timeout: 5000,   // 5 seconds
+  client_login_timeout: 30000,    // 30 seconds
+  server_idle_timeout: 300000,    // 5 minutes
+  client_idle_timeout: 600000,    // 10 minutes
+});
+
+const server = new Server(config);
+await server.start();
+```
 
 ## Architecture
 
@@ -107,6 +133,7 @@ src/
 - Bidirectional query proxying
 - Connection pool management with authentication
 - Session-level connection pooling
+- Connection timeouts and limits (PgBouncer-compatible)
 - Graceful shutdown handling
 - Standalone binary compilation
 
@@ -120,7 +147,6 @@ src/
 - [ ] Multiple database/server support
 - [ ] Load balancing across servers
 - [ ] Admin interface and statistics
-- [ ] Connection timeouts and limits
 
 ## Contributing
 

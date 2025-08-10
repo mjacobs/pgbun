@@ -18,7 +18,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "bun-types": "^1.2.19"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
