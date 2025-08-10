@@ -28,7 +28,7 @@ export class ConnectionPool {
     return `${database}:${user}`;
   }
 
-  async getConnection(database: string, user: string): Promise<ServerConnection | null> {
+  async getConnection(database: string, user: string): Promise<ServerConnection | undefined> {
     const poolKey = this.getPoolKey(database, user);
     let pool = this.pools.get(poolKey);
 
@@ -65,13 +65,14 @@ export class ConnectionPool {
     console.log(`Released connection ${connection.id}`);
   }
 
-  private async createConnection(database: string, user: string): Promise<ServerConnection | null> {
+  private async createConnection(database: string, user: string): Promise<ServerConnection | undefined> {
     const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     console.log(`Creating new connection ${connectionId} for ${user}@${database}`);
 
     try {
-      const socket = await Bun.connect({
+      // Create connection with timeout
+      const connectPromise = Bun.connect({
         hostname: this.config.serverHost,
         port: this.config.serverPort,
         socket: {
@@ -84,6 +85,15 @@ export class ConnectionPool {
         }
       });
 
+      // Apply server connect timeout
+      const socket = await Promise.race([
+        connectPromise,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Connection timeout after ${this.config.serverConnectTimeout}ms`)), 
+                     this.config.serverConnectTimeout);
+        })
+      ]);
+
       const connection: ServerConnection = {
         id: connectionId,
         socket,
@@ -95,13 +105,13 @@ export class ConnectionPool {
         authenticated: false,
       };
 
-      // Authenticate with PostgreSQL server
+      // Authenticate with PostgreSQL server (this also has a timeout)
       await this.authenticateServerConnection(connection);
 
       return connection;
     } catch (error) {
       console.error(`Failed to create connection ${connectionId}:`, error);
-      return null;
+      return undefined;
     }
   }
 
@@ -114,12 +124,12 @@ export class ConnectionPool {
       let authenticated = false;
       const authTimeout = setTimeout(() => {
         if (!authenticated) {
-          reject(new Error('Authentication timeout'));
+          reject(new Error(`Authentication timeout after ${this.config.serverConnectTimeout}ms`));
         }
-      }, 5000);
+      }, this.config.serverConnectTimeout);
 
       // Handle server messages during authentication
-      connection.socket.data = (socket: Socket, data: Buffer) => {
+      (connection.socket as any).data = (socket: Socket, data: Buffer) => {
         try {
           console.log(`Received server data during auth for ${connection.id}: ${data.length} bytes`);
           const messages = this.protocol.parseServerMessage(data);
@@ -131,11 +141,11 @@ export class ConnectionPool {
               clearTimeout(authTimeout);
               
               // Reset socket handlers for normal operation
-              connection.socket.data = () => {}; // Will be overridden when connection is used
-              connection.socket.close = () => {
+              (connection.socket as any).data = () => {}; // Will be overridden when connection is used
+              (connection.socket as any).close = () => {
                 console.log(`Server connection ${connection.id} closed`);
               };
-              connection.socket.error = (socket: Socket, error: Error) => {
+              (connection.socket as any).error = (socket: Socket, error: Error) => {
                 console.error(`Server connection ${connection.id} error:`, error);
               };
               
@@ -160,7 +170,7 @@ export class ConnectionPool {
       });
       
       console.log(`Sending startup message to server for ${connection.user}@${connection.database}`);
-      connection.socket.write(startupMessage);
+      connection.socket!.write(startupMessage);
     });
   }
 
@@ -190,5 +200,39 @@ export class ConnectionPool {
       }))
     };
     return stats;
+  }
+
+  cleanupIdleConnections(): number {
+    if (this.config.serverIdleTimeout <= 0) {
+      return 0; // Idle timeout disabled
+    }
+
+    let cleaned = 0;
+    const now = new Date();
+    const maxIdleTime = this.config.serverIdleTimeout;
+
+    for (const [poolKey, pool] of this.pools.entries()) {
+      for (let i = pool.length - 1; i >= 0; i--) {
+        const connection = pool[i];
+        
+        if (!connection.inUse) {
+          const idleTime = now.getTime() - connection.lastUsed.getTime();
+          
+          if (idleTime > maxIdleTime) {
+            console.log(`Closing idle server connection ${connection.id} (idle for ${Math.floor(idleTime / 1000)}s)`);
+            
+            if (connection.socket) {
+              connection.socket.end();
+            }
+            
+            pool.splice(i, 1);
+            this.totalConnections--;
+            cleaned++;
+          }
+        }
+      }
+    }
+
+    return cleaned;
   }
 }

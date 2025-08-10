@@ -17,6 +17,11 @@ export interface ServerConfig {
   log_disconnections: boolean;
   log_pooler_errors: boolean;
   stats_period: number;
+  // Connection timeout settings (in milliseconds)
+  server_connect_timeout: number;
+  client_login_timeout: number;
+  server_idle_timeout: number;
+  client_idle_timeout: number;
 }
 
 export class Config {
@@ -42,6 +47,11 @@ export class Config {
       log_disconnections: true,
       log_pooler_errors: true,
       stats_period: 60000,
+      // Connection timeouts (defaults match pgbouncer)
+      server_connect_timeout: 15000,  // 15 seconds
+      client_login_timeout: 60000,    // 60 seconds  
+      server_idle_timeout: 600000,    // 10 minutes
+      client_idle_timeout: 0,         // 0 = disabled
       ...config
     };
   }
@@ -84,5 +94,21 @@ export class Config {
 
   get logDisconnections(): boolean {
     return this.config.log_disconnections;
+  }
+
+  get serverConnectTimeout(): number {
+    return this.config.server_connect_timeout;
+  }
+
+  get clientLoginTimeout(): number {
+    return this.config.client_login_timeout;
+  }
+
+  get serverIdleTimeout(): number {
+    return this.config.server_idle_timeout;
+  }
+
+  get clientIdleTimeout(): number {
+    return this.config.client_idle_timeout;
   }
 }
