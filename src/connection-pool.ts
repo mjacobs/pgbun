@@ -141,6 +141,7 @@ export class ConnectionPool {
           if (this.config.serverTlsCertFile) {
             tlsOptions.cert = Bun.file(this.config.serverTlsCertFile);
           }
+
           if (mode === 'verify-full') {
             tlsOptions.serverName = this.config.serverHost;
           }

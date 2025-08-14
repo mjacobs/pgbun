@@ -19,11 +19,13 @@ export interface ServerConfig {
   log_disconnections: boolean;
   log_pooler_errors: boolean;
   stats_period: number;
+  
   // Connection timeout settings (in milliseconds)
   server_connect_timeout: number;
   client_login_timeout: number;
   server_idle_timeout: number;
   client_idle_timeout: number;
+
   // TLS settings
   client_tls_mode: SSLMode;
   client_tls_key_file?: string;
@@ -58,11 +60,13 @@ export class Config {
       log_disconnections: true,
       log_pooler_errors: true,
       stats_period: 60000,
+
       // Connection timeouts (defaults match pgbouncer)
       server_connect_timeout: 15000,  // 15 seconds
       client_login_timeout: 60000,    // 60 seconds
       server_idle_timeout: 600000,    // 10 minutes
       client_idle_timeout: 0,         // 0 = disabled
+
       // TLS settings
       client_tls_mode: 'disable',
       server_tls_mode: 'prefer',

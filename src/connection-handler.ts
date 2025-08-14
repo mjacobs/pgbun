@@ -51,6 +51,7 @@ export class ConnectionHandler {
           socket.end();
           return;
         }
+        // If not SSLRequest, proceed with regular startup
         this.processData(session, data);
       }
     } else {
@@ -172,6 +173,7 @@ export class ConnectionHandler {
         
         session.socket.write(this.protocol.createAuthenticationOk());
         session.socket.write(this.protocol.createReadyForQuery());
+        session.state = 'active';
         
         session.state = 'active';
 
@@ -267,6 +269,7 @@ class ClientSession {
   user?: string;
   serverConnection?: ServerConnection;
   state: 'new' | 'authenticating' | 'active' = 'new';
+
   connectedAt: Date;
   lastActivity: Date;
   authenticated: boolean = false;
