@@ -340,6 +340,22 @@ export class PostgreSQLProtocol {
     return message;
   }
 
+  createSSLRequestMessage(): Buffer {
+    const buffer = Buffer.alloc(8);
+    buffer.writeInt32BE(8, 0);
+    buffer.writeInt32BE(80877103, 4); // SSLRequest code
+    return buffer;
+  }
+
+  isSSLRequest(buffer: Buffer): boolean {
+    if (buffer.length !== 8) {
+      return false;
+    }
+    const length = buffer.readInt32BE(0);
+    const code = buffer.readInt32BE(4);
+    return length === 8 && code === 80877103;
+  }
+
   createQueryMessage(query: string): Buffer {
     const queryBuffer = Buffer.from(query + '\0', 'utf8');
     const message = Buffer.alloc(5 + queryBuffer.length);

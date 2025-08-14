@@ -1,3 +1,5 @@
+export type SSLMode = 'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full';
+
 export interface ServerConfig {
   listen_port: number;
   listen_host: string;
@@ -22,6 +24,15 @@ export interface ServerConfig {
   client_login_timeout: number;
   server_idle_timeout: number;
   client_idle_timeout: number;
+  // TLS settings
+  client_tls_mode: SSLMode;
+  client_tls_key_file?: string;
+  client_tls_cert_file?: string;
+  client_tls_ca_file?: string;
+  server_tls_mode: SSLMode;
+  server_tls_key_file?: string;
+  server_tls_cert_file?: string;
+  server_tls_ca_file?: string;
 }
 
 export class Config {
@@ -49,9 +60,12 @@ export class Config {
       stats_period: 60000,
       // Connection timeouts (defaults match pgbouncer)
       server_connect_timeout: 15000,  // 15 seconds
-      client_login_timeout: 60000,    // 60 seconds  
+      client_login_timeout: 60000,    // 60 seconds
       server_idle_timeout: 600000,    // 10 minutes
       client_idle_timeout: 0,         // 0 = disabled
+      // TLS settings
+      client_tls_mode: 'disable',
+      server_tls_mode: 'prefer',
       ...config
     };
   }
@@ -110,5 +124,38 @@ export class Config {
 
   get clientIdleTimeout(): number {
     return this.config.client_idle_timeout;
+  }
+
+  // TLS getters
+  get clientTlsMode(): SSLMode {
+    return this.config.client_tls_mode;
+  }
+
+  get clientTlsKeyFile(): string | undefined {
+    return this.config.client_tls_key_file;
+  }
+
+  get clientTlsCertFile(): string | undefined {
+    return this.config.client_tls_cert_file;
+  }
+
+  get clientTlsCaFile(): string | undefined {
+    return this.config.client_tls_ca_file;
+  }
+
+  get serverTlsMode(): SSLMode {
+    return this.config.server_tls_mode;
+  }
+
+  get serverTlsKeyFile(): string | undefined {
+    return this.config.server_tls_key_file;
+  }
+
+  get serverTlsCertFile(): string | undefined {
+    return this.config.server_tls_cert_file;
+  }
+
+  get serverTlsCaFile(): string | undefined {
+    return this.config.server_tls_ca_file;
   }
 }
