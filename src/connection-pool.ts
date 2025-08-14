@@ -1,5 +1,5 @@
 import { Socket } from "bun";
-import { Config } from "./config";
+import { Config, SSLMode } from "./config";
 import { PostgreSQLProtocol } from "./protocol";
 
 export interface ServerConnection {
@@ -71,28 +71,19 @@ export class ConnectionPool {
     console.log(`Creating new connection ${connectionId} for ${user}@${database}`);
 
     try {
-      // Create connection with timeout
-      const connectPromise = Bun.connect({
-        hostname: this.config.serverHost,
-        port: this.config.serverPort,
-        socket: {
-          data: () => {}, // Will be handled per connection
-          open: () => {},
-          close: () => {},
-          error: (socket, error) => {
-            console.error(`Server connection error for ${connectionId}:`, error);
-          }
-        }
-      });
+      const connectPromise = this.connectWithSSL(this.config.serverTlsMode);
 
-      // Apply server connect timeout
       const socket = await Promise.race([
         connectPromise,
-        new Promise<never>((_, reject) => {
+        new Promise<Socket | never>((_, reject) => {
           setTimeout(() => reject(new Error(`Connection timeout after ${this.config.serverConnectTimeout}ms`)), 
                      this.config.serverConnectTimeout);
         })
       ]);
+
+      if (!socket) {
+        throw new Error("Failed to establish socket connection.");
+      }
 
       const connection: ServerConnection = {
         id: connectionId,
@@ -105,7 +96,6 @@ export class ConnectionPool {
         authenticated: false,
       };
 
-      // Authenticate with PostgreSQL server (this also has a timeout)
       await this.authenticateServerConnection(connection);
 
       return connection;
@@ -113,6 +103,68 @@ export class ConnectionPool {
       console.error(`Failed to create connection ${connectionId}:`, error);
       return undefined;
     }
+  }
+
+  private async connectWithSSL(mode: SSLMode): Promise<Socket | null> {
+    const hostDetails = {
+      hostname: this.config.serverHost,
+      port: this.config.serverPort,
+    };
+
+    const emptyHandlers = {
+      data: () => {},
+      open: () => {},
+      close: () => {},
+      error: () => {},
+    };
+
+    if (mode === 'disable') {
+      console.log('Connecting to server with SSL disabled.');
+      return Bun.connect({ ...hostDetails, socket: emptyHandlers });
+    }
+
+    const socket = await Bun.connect({ ...hostDetails, socket: emptyHandlers });
+
+    return new Promise((resolve, reject) => {
+      socket.data = (sock: Socket, data: Buffer) => {
+        sock.data = emptyHandlers.data;
+
+        if (data.toString() === 'S') {
+          console.log("Server accepted SSL request. Upgrading connection...");
+          const tlsOptions: Bun.TLS.Options = {};
+          if (this.config.serverTlsCaFile) {
+            tlsOptions.ca = Bun.file(this.config.serverTlsCaFile);
+          }
+          if (this.config.serverTlsKeyFile) {
+            tlsOptions.key = Bun.file(this.config.serverTlsKeyFile);
+          }
+          if (this.config.serverTlsCertFile) {
+            tlsOptions.cert = Bun.file(this.config.serverTlsCertFile);
+          }
+          if (mode === 'verify-full') {
+            tlsOptions.serverName = this.config.serverHost;
+          }
+          try {
+            sock.upgradeTLS(tlsOptions);
+            resolve(sock);
+          } catch (e) {
+            reject(e);
+          }
+        } else if (data.toString() === 'N') {
+          if (mode === 'prefer' || mode === 'allow') {
+            console.log("Server refused SSL, proceeding with non-TLS connection.");
+            resolve(sock);
+          } else {
+            reject(new Error(`Server refused SSL connection, but mode is '${mode}'`));
+          }
+        } else {
+          reject(new Error('Invalid response to SSLRequest'));
+        }
+      };
+
+      const sslRequest = this.protocol.createSSLRequestMessage();
+      socket.write(sslRequest);
+    });
   }
 
   private async authenticateServerConnection(connection: ServerConnection): Promise<void> {
@@ -128,7 +180,6 @@ export class ConnectionPool {
         }
       }, this.config.serverConnectTimeout);
 
-      // Handle server messages during authentication
       (connection.socket as any).data = (socket: Socket, data: Buffer) => {
         try {
           console.log(`Received server data during auth for ${connection.id}: ${data.length} bytes`);
@@ -140,8 +191,7 @@ export class ConnectionPool {
               connection.authenticated = true;
               clearTimeout(authTimeout);
               
-              // Reset socket handlers for normal operation
-              (connection.socket as any).data = () => {}; // Will be overridden when connection is used
+              (connection.socket as any).data = () => {};
               (connection.socket as any).close = () => {
                 console.log(`Server connection ${connection.id} closed`);
               };
@@ -154,7 +204,7 @@ export class ConnectionPool {
               clearTimeout(authTimeout);
               reject(new Error(`Authentication failed: ${message.data?.message || 'Unknown error'}`));
             } else if (message.type === 'ReadyForQuery') {
-              // Ignore ReadyForQuery during auth - we'll handle this in normal operation
+              // Ignore
             }
           }
         } catch (error) {
@@ -163,7 +213,6 @@ export class ConnectionPool {
         }
       };
 
-      // Send startup message to PostgreSQL server
       const startupMessage = this.protocol.createStartupMessage({
         user: connection.user,
         database: connection.database
@@ -204,7 +253,7 @@ export class ConnectionPool {
 
   cleanupIdleConnections(): number {
     if (this.config.serverIdleTimeout <= 0) {
-      return 0; // Idle timeout disabled
+      return 0;
     }
 
     let cleaned = 0;

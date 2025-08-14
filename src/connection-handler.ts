@@ -1,6 +1,6 @@
 import { Socket } from "bun";
 import { Config } from "./config";
-import { ConnectionPool } from "./connection-pool";
+import { ConnectionPool, ServerConnection } from "./connection-pool";
 import { PostgreSQLProtocol } from "./protocol";
 
 export class ConnectionHandler {
@@ -15,7 +15,6 @@ export class ConnectionHandler {
     this.connectionPool = new ConnectionPool(config);
     this.protocol = new PostgreSQLProtocol();
     
-    // Start periodic cleanup for idle connections
     this.startCleanupTimer();
   }
 
@@ -23,7 +22,6 @@ export class ConnectionHandler {
     const session = new ClientSession(socket);
     this.clientSessions.set(socket, session);
     
-    // Set client login timeout if configured
     if (this.config.clientLoginTimeout > 0) {
       session.loginTimer = setTimeout(() => {
         if (!session.authenticated) {
@@ -39,9 +37,67 @@ export class ConnectionHandler {
     const session = this.clientSessions.get(socket);
     if (!session) return;
 
-    // Update activity timestamp
     session.updateActivity();
 
+    if (session.state === 'new') {
+      if (this.protocol.isSSLRequest(data)) {
+        this.handleSSLRequest(session);
+      } else {
+        const mode = this.config.clientTlsMode;
+        if (mode === 'require' || mode === 'verify-ca' || mode === 'verify-full') {
+          console.error("Client attempted non-TLS connection, but TLS is required.");
+          const errorResponse = this.protocol.createErrorResponse('Server requires TLS');
+          socket.write(errorResponse);
+          socket.end();
+          return;
+        }
+        this.processData(session, data);
+      }
+    } else {
+      this.processData(session, data);
+    }
+  }
+
+  private handleSSLRequest(session: ClientSession): void {
+    const mode = this.config.clientTlsMode;
+    const socket = session.socket;
+
+    if (mode === 'disable') {
+      console.log("Client requested SSL, but it's disabled. Rejecting.");
+      socket.write('N');
+      socket.end();
+      return;
+    }
+
+    const tlsOptions: Bun.TLS.Options = {};
+    if (this.config.clientTlsKeyFile && this.config.clientTlsCertFile) {
+      tlsOptions.key = Bun.file(this.config.clientTlsKeyFile);
+      tlsOptions.cert = Bun.file(this.config.clientTlsCertFile);
+    } else {
+      console.error("TLS mode is enabled, but key/cert files are not configured.");
+      socket.end();
+      return;
+    }
+
+    if ((mode === 'verify-ca' || mode === 'verify-full') && this.config.clientTlsCaFile) {
+      tlsOptions.ca = Bun.file(this.config.clientTlsCaFile);
+    } else if (mode === 'verify-ca' || mode === 'verify-full') {
+      console.error("TLS verify mode enabled, but CA file is not configured.");
+      socket.end();
+      return;
+    }
+
+    try {
+      socket.write('S');
+      socket.upgradeTLS(tlsOptions);
+      session.state = 'authenticating';
+    } catch (e) {
+      console.error("Failed to upgrade to TLS:", e);
+      socket.end();
+    }
+  }
+
+  private processData(session: ClientSession, data: Buffer): void {
     try {
       const messages = this.protocol.parseClientMessage(data);
       for (const message of messages) {
@@ -49,7 +105,7 @@ export class ConnectionHandler {
       }
     } catch (error) {
       console.error('Error parsing client message:', error);
-      socket.end();
+      session.socket.end();
     }
   }
 
@@ -95,7 +151,8 @@ export class ConnectionHandler {
   private async handleStartup(session: ClientSession, message: any): Promise<void> {
     session.database = message.data.database || 'postgres';
     session.user = message.data.user || 'postgres';
-    
+    session.state = 'authenticating';
+
     try {
       const serverConnection = await this.connectionPool.getConnection(
         session.database!,
@@ -106,19 +163,18 @@ export class ConnectionHandler {
         session.serverConnection = serverConnection;
         session.authenticated = true;
         
-        // Clear login timeout since authentication succeeded
         if (session.loginTimer) {
           clearTimeout(session.loginTimer);
           session.loginTimer = undefined;
         }
         
-        // Set up bidirectional proxying
         this.setupServerToClientProxy(session, serverConnection);
         
-        // Send authentication success to client
         session.socket.write(this.protocol.createAuthenticationOk());
         session.socket.write(this.protocol.createReadyForQuery());
         
+        session.state = 'active';
+
         console.log(`Client connected: ${session.user}@${session.database}`);
       } else {
         session.socket.write(this.protocol.createErrorResponse('Connection pool exhausted'));
@@ -139,19 +195,15 @@ export class ConnectionHandler {
 
     console.log(`Proxying query: ${message.data.query}`);
     
-    // Create query message and send to PostgreSQL server
     const queryMessage = this.protocol.createQueryMessage(message.data.query);
     session.serverConnection.socket.write(queryMessage);
   }
 
-  private setupServerToClientProxy(session: ClientSession, serverConnection: any): void {
+  private setupServerToClientProxy(session: ClientSession, serverConnection: ServerConnection): void {
     if (!serverConnection.socket) return;
 
-    // Set up server data handler to proxy responses back to client
     (serverConnection.socket as any).data = (socket: any, data: Buffer) => {
       try {
-        // For now, just proxy raw data back to client
-        // In a more sophisticated implementation, we might parse and modify messages
         session.socket.write(data);
       } catch (error) {
         console.error('Error proxying server data to client:', error);
@@ -159,13 +211,11 @@ export class ConnectionHandler {
       }
     };
 
-    // Handle server connection close
     (serverConnection.socket as any).close = () => {
       console.log(`Server connection closed for ${session.user}@${session.database}`);
       session.socket.end();
     };
 
-    // Handle server connection errors
     (serverConnection.socket as any).error = (socket: any, error: Error) => {
       console.error('Server connection error:', error);
       session.socket.write(this.protocol.createErrorResponse('Server connection error'));
@@ -174,20 +224,17 @@ export class ConnectionHandler {
   }
 
   private startCleanupTimer(): void {
-    // Run cleanup every 30 seconds
     this.cleanupTimer = setInterval(() => {
       this.cleanupIdleConnections();
     }, 30000);
   }
 
   private cleanupIdleConnections(): void {
-    // Clean up idle server connections
     const serverCleaned = this.connectionPool.cleanupIdleConnections();
     if (serverCleaned > 0) {
       console.log(`Cleaned up ${serverCleaned} idle server connections`);
     }
 
-    // Clean up idle client connections
     if (this.config.clientIdleTimeout > 0) {
       const clientCleaned = this.cleanupIdleClients();
       if (clientCleaned > 0) {
@@ -218,7 +265,8 @@ class ClientSession {
   socket: Socket;
   database?: string;
   user?: string;
-  serverConnection?: any;
+  serverConnection?: ServerConnection;
+  state: 'new' | 'authenticating' | 'active' = 'new';
   connectedAt: Date;
   lastActivity: Date;
   authenticated: boolean = false;
