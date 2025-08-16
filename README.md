@@ -78,6 +78,16 @@ const server = new Server(config);
 await server.start();
 ```
 
+## Testing
+
+This project uses `bun:test` for running tests. The tests are located in the `tests/` directory and are separated into `unit` and `integration` tests.
+
+To run all tests, use the following command:
+
+```bash
+bun test
+```
+
 ## Architecture
 
 ```
