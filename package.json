@@ -4,6 +4,7 @@
   "description": "PostgreSQL connection pool and proxy built with Bun",
   "main": "src/index.ts",
   "scripts": {
+    "test": "bun test",
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir ./dist --target bun --minify",
     "start": "bun run dist/index.js",
