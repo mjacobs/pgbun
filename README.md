@@ -49,7 +49,7 @@ pgbun uses sensible defaults but can be configured for your environment:
 
 - **Listen Port**: 6432 (default)
 - **PostgreSQL Server**: localhost:5432 (default)
-- **Pool Mode**: session (default)
+- **Pool Mode**: 'session' (default; options: 'session', 'transaction', 'statement')
 - **Max Connections**: 100 (default)
 - **Pool Size**: 25 (default)
 
@@ -68,6 +68,7 @@ Example with custom timeouts:
 import { Config, Server } from 'pgbun';
 
 const config = new Config({
+  pool_mode: 'transaction',  // 'session', 'transaction', or 'statement'
   server_connect_timeout: 5000,   // 5 seconds
   client_login_timeout: 30000,    // 30 seconds
   server_idle_timeout: 300000,    // 5 minutes
@@ -108,6 +109,12 @@ pgbun acts as a transparent proxy, establishing real connections to PostgreSQL s
 
 ### Pool Modes
 
+pgbun supports three pooling modes, configurable via `pool_mode` in the config:
+
+- **Session** (default): Dedicates a single server connection to the client for the entire session lifetime. Suitable for applications that maintain long-lived sessions with stateful connections.
+- **Transaction**: Assigns a server connection per transaction, reusing within the transaction (BEGIN to COMMIT/ROLLBACK) and automatically releasing after transaction end. Detected via PostgreSQL protocol messages for transparent operation. Now fully implemented.
+- **Statement**: Assigns a server connection per individual statement/query. Basic stub implemented (gets/releases per query); full Parse/Bind/Execute support pending for prepared statements.
+
 - **Session**: Connection assigned for entire client session (default)
 - **Transaction**: Connection assigned per transaction
 - **Statement**: Connection assigned per statement
@@ -139,18 +146,20 @@ src/
 
 ### ✅ Implemented
 - Real PostgreSQL server connections
-- PostgreSQL protocol parsing and message creation
+- PostgreSQL protocol parsing and message creation (including transaction boundary detection)
 - Bidirectional query proxying
 - Connection pool management with authentication
 - Session-level connection pooling
+- Transaction-level connection pooling (with automatic release on COMMIT/ROLLBACK)
+- Basic statement-level pooling stub (per-query assignment/release)
 - Connection timeouts and limits (PgBouncer-compatible)
 - Graceful shutdown handling
 - Standalone binary compilation
 
 ### 🚧 Roadmap
-- [ ] Transaction-level pooling
-- [ ] Statement-level pooling
-- [ ] Connection health checks and reconnection
+- [x] Transaction-level pooling
+- [ ] Full statement-level pooling (prepared statements support)
+- [ ] Connection health checks and reconnection (basic stub)
 - [ ] Metrics and monitoring interface
 - [ ] Configuration file support
 - [ ] SSL/TLS support
