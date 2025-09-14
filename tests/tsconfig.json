@@ -3,7 +3,9 @@
   "compilerOptions": {
     "composite": true,
     "outDir": "./dist",
-    "rootDir": "."
+    "rootDir": "..",
+    "noEmit": true,
+    "types": ["node", "bun-types"]
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts", "../src/**/*.ts"]
 }

@@ -72,6 +72,12 @@ export class Config {
       server_tls_mode: 'prefer',
       ...config
     };
+
+    // Validate pool_mode
+    const validModes = ['session', 'transaction', 'statement'] as const;
+    if (!validModes.includes(this.config.pool_mode)) {
+      throw new Error(`Invalid pool_mode: '${this.config.pool_mode}'. Must be one of: ${validModes.join(', ')}`);
+    }
   }
 
   static load(): Config {

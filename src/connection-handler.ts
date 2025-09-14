@@ -8,7 +8,7 @@ export class ConnectionHandler {
   private connectionPool: ConnectionPool;
   private protocol: PostgreSQLProtocol;
   private clientSessions = new Map<Socket, ClientSession>();
-  private cleanupTimer?: Timer;
+  private cleanupTimer?: number;
 
   constructor(config: Config) {
     this.config = config;
@@ -19,7 +19,7 @@ export class ConnectionHandler {
   }
 
   handleClient(socket: Socket): void {
-    const session = new ClientSession(socket);
+    const session = new ClientSession(socket, this.config.poolMode);
     this.clientSessions.set(socket, session);
     
     if (this.config.clientLoginTimeout > 0) {
@@ -116,7 +116,9 @@ export class ConnectionHandler {
       if (session.loginTimer) {
         clearTimeout(session.loginTimer);
       }
-      this.connectionPool.releaseConnection(session.serverConnection);
+      if (session.currentServerConnection) {
+        this.connectionPool.releaseConnection(session.currentServerConnection, this.config.poolMode === 'session' ? session.sessionId : undefined);
+      }
       this.clientSessions.delete(socket);
     }
   }
@@ -155,33 +157,32 @@ export class ConnectionHandler {
     session.state = 'authenticating';
 
     try {
-      const serverConnection = await this.connectionPool.getConnection(
-        session.database!,
-        session.user!
-      );
-      
-      if (serverConnection) {
-        session.serverConnection = serverConnection;
-        session.authenticated = true;
+      if (this.config.poolMode === 'session') {
+        const serverConnection = await this.connectionPool.getConnection(
+          session.sessionId,
+          session.database!,
+          session.user!
+        );
         
-        if (session.loginTimer) {
-          clearTimeout(session.loginTimer);
-          session.loginTimer = undefined;
+        if (serverConnection) {
+          session.currentServerConnection = serverConnection;
+          this.setupServerToClientProxy(session, serverConnection);
+        } else {
+          throw new Error('No available connection for session');
         }
-        
-        this.setupServerToClientProxy(session, serverConnection);
-        
-        session.socket.write(this.protocol.createAuthenticationOk());
-        session.socket.write(this.protocol.createReadyForQuery());
-        session.state = 'active';
-        
-        session.state = 'active';
-
-        console.log(`Client connected: ${session.user}@${session.database}`);
-      } else {
-        session.socket.write(this.protocol.createErrorResponse('Connection pool exhausted'));
-        session.socket.end();
       }
+      session.authenticated = true;
+      
+      if (session.loginTimer) {
+        clearTimeout(session.loginTimer);
+        session.loginTimer = undefined;
+      }
+      
+      session.socket.write(this.protocol.createAuthenticationOk());
+      session.socket.write(this.protocol.createReadyForQuery());
+      session.state = 'active';
+
+      console.log(`Client connected: ${session.user}@${session.database}`);
     } catch (error) {
       console.error('Failed to establish server connection:', error);
       session.socket.write(this.protocol.createErrorResponse('Failed to connect to database'));
@@ -190,15 +191,35 @@ export class ConnectionHandler {
   }
 
   private async handleQuery(session: ClientSession, message: any): Promise<void> {
-    if (!session.serverConnection || !session.serverConnection.socket) {
-      session.socket.write(this.protocol.createErrorResponse('No server connection'));
-      return;
+    if (!session.currentServerConnection || !session.currentServerConnection.socket) {
+      if (this.config.poolMode === 'transaction') {
+        const serverConnection = await this.connectionPool.getConnection(undefined, session.database!, session.user!);
+        if (serverConnection) {
+          session.currentServerConnection = serverConnection;
+          this.setupServerToClientProxy(session, serverConnection);
+        } else {
+          session.socket.write(this.protocol.createErrorResponse('No available connections'));
+          return;
+        }
+      } else {
+        session.socket.write(this.protocol.createErrorResponse('No server connection'));
+        return;
+      }
+    }
+
+    if (message.data.transactionType) {
+      if (message.data.transactionType === 'begin' && this.config.poolMode === 'transaction') {
+        session.inTransaction = true;
+      }
+      if ((message.data.transactionType === 'commit' || message.data.transactionType === 'rollback') && this.config.poolMode === 'transaction') {
+        session.pendingRelease = true;
+      }
     }
 
     console.log(`Proxying query: ${message.data.query}`);
     
     const queryMessage = this.protocol.createQueryMessage(message.data.query);
-    session.serverConnection.socket.write(queryMessage);
+    session.currentServerConnection.socket.write(queryMessage);
   }
 
   private setupServerToClientProxy(session: ClientSession, serverConnection: ServerConnection): void {
@@ -206,6 +227,18 @@ export class ConnectionHandler {
 
     (serverConnection.socket as any).data = (socket: any, data: Buffer) => {
       try {
+        const msgs = this.protocol.parseServerMessage(data);
+        const hasReadyForQuery = msgs.some(m => m.type === 'ReadyForQuery');
+        if (hasReadyForQuery && this.config.poolMode === 'transaction') {
+          if (session.pendingRelease || !session.inTransaction) {
+            this.connectionPool.releaseConnection(session.currentServerConnection, undefined);
+            session.currentServerConnection = undefined;
+          }
+          if (session.pendingRelease) {
+            session.pendingRelease = false;
+            session.inTransaction = false;
+          }
+        }
         session.socket.write(data);
       } catch (error) {
         console.error('Error proxying server data to client:', error);
@@ -267,18 +300,25 @@ class ClientSession {
   socket: Socket;
   database?: string;
   user?: string;
-  serverConnection?: ServerConnection;
+  currentServerConnection?: ServerConnection;
   state: 'new' | 'authenticating' | 'active' = 'new';
 
   connectedAt: Date;
   lastActivity: Date;
   authenticated: boolean = false;
-  loginTimer?: Timer;
+  loginTimer?: number;
+  pendingRelease: boolean = false;
 
-  constructor(socket: Socket) {
+  sessionId: string;
+  poolMode: 'session' | 'transaction' | 'statement';
+  inTransaction: boolean = false;
+
+  constructor(socket: Socket, poolMode: 'session' | 'transaction' | 'statement') {
     this.socket = socket;
     this.connectedAt = new Date();
     this.lastActivity = new Date();
+    this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.poolMode = poolMode;
   }
 
   updateActivity(): void {

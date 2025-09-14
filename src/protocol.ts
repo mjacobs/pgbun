@@ -45,7 +45,14 @@ export class PostgreSQLProtocol {
           break;
         case 'C':
           const tag = this.readCString(messageData, 0);
-          messages.push({ type: 'CommandComplete', data: { tag } });
+          const transactionType = this.detectTransactionCommand(tag);
+          messages.push({
+            type: 'CommandComplete',
+            data: {
+              tag,
+              ...(transactionType && { transactionType })
+            }
+          });
           break;
         default:
           console.warn(`Unknown server message type: ${messageType}`);
@@ -123,10 +130,22 @@ export class PostgreSQLProtocol {
 
   private parseQuery(buffer: Buffer): PostgreSQLMessage {
     const query = this.readCString(buffer, 0);
+    const transactionType = this.detectTransactionCommand(query);
     return {
       type: 'query',
-      data: { query }
+      data: {
+        query,
+        ...(transactionType && { transactionType })
+      }
     };
+  }
+
+  private detectTransactionCommand(str: string): 'begin' | 'commit' | 'rollback' | null {
+    const upper = str.trim().toUpperCase();
+    if (upper.startsWith('BEGIN')) return 'begin';
+    if (upper.startsWith('COMMIT')) return 'commit';
+    if (upper.startsWith('ROLLBACK')) return 'rollback';
+    return null;
   }
 
   private readCString(buffer: Buffer, offset: number): string {

@@ -16,6 +16,7 @@ export interface ServerConnection {
 export class ConnectionPool {
   private config: Config;
   private pools = new Map<string, ServerConnection[]>();
+  private sessionTrackedConnections = new Map<string, ServerConnection>();
   private totalConnections = 0;
   private protocol: PostgreSQLProtocol;
 
@@ -28,9 +29,22 @@ export class ConnectionPool {
     return `${database}:${user}`;
   }
 
-  async getConnection(database: string, user: string): Promise<ServerConnection | undefined> {
+  async getConnection(sessionId: string | undefined, database: string, user: string): Promise<ServerConnection | undefined> {
     const poolKey = this.getPoolKey(database, user);
     let pool = this.pools.get(poolKey);
+    
+    let connection: ServerConnection | undefined;
+    
+    if (this.config.poolMode === 'session' && sessionId) {
+      const sessionKey = `${sessionId}:${poolKey}`;
+      const tracked = this.sessionTrackedConnections.get(sessionKey);
+      if (tracked && !tracked.inUse) {
+        tracked.inUse = true;
+        tracked.lastUsed = new Date();
+        console.log(`Reusing session-tracked connection ${tracked.id} for session ${sessionId}`);
+        return tracked;
+      }
+    }
 
     if (!pool) {
       pool = [];
@@ -44,6 +58,11 @@ export class ConnectionPool {
       if (connection) {
         pool.push(connection);
         this.totalConnections++;
+        
+        if (this.config.poolMode === 'session' && sessionId) {
+          const sessionKey = `${sessionId}:${poolKey}`;
+          this.sessionTrackedConnections.set(sessionKey, connection);
+        }
       }
     }
 
@@ -56,13 +75,22 @@ export class ConnectionPool {
     return connection;
   }
 
-  releaseConnection(connection?: ServerConnection): void {
+  releaseConnection(connection?: ServerConnection, sessionId?: string): void {
     if (!connection) return;
 
     connection.inUse = false;
     connection.lastUsed = new Date();
     
     console.log(`Released connection ${connection.id}`);
+    
+    if (this.config.poolMode === 'session' && sessionId && connection.database && connection.user) {
+      const poolKey = this.getPoolKey(connection.database, connection.user);
+      const sessionKey = `${sessionId}:${poolKey}`;
+      if (this.sessionTrackedConnections.get(sessionKey) === connection) {
+        this.sessionTrackedConnections.delete(sessionKey);
+        console.log(`Removed session-tracked connection ${connection.id} for session ${sessionId}`);
+      }
+    }
   }
 
   private async createConnection(database: string, user: string): Promise<ServerConnection | undefined> {
