@@ -21,6 +21,17 @@ export class ConnectionHandler {
   handleClient(socket: Socket): void {
     const session = new ClientSession(socket, this.config.poolMode);
     this.clientSessions.set(socket, session);
+
+    // Set up client socket event handlers
+    (socket as any).data = (data: Uint8Array) => {
+      this.handleClientData(socket, data);
+    };
+    (socket as any).error = (error: Error) => {
+      this.handleClientError(socket, error);
+    };
+    (socket as any).closed = () => {
+      this.handleClientClose(socket);
+    };
     
     if (this.config.clientLoginTimeout > 0) {
       session.loginTimer = setTimeout(() => {
@@ -29,18 +40,18 @@ export class ConnectionHandler {
           socket.write(this.protocol.createErrorResponse('Login timeout'));
           socket.end();
         }
-      }, this.config.clientLoginTimeout);
+      }, this.config.clientLoginTimeout) as unknown as number;
     }
   }
 
-  handleClientData(socket: Socket, data: Buffer): void {
+  handleClientData(socket: Socket, data: Uint8Array): void {
     const session = this.clientSessions.get(socket);
     if (!session) return;
 
     session.updateActivity();
 
     if (session.state === 'new') {
-      if (this.protocol.isSSLRequest(data)) {
+      if (this.protocol.isSSLRequest(Buffer.from(data))) {
         this.handleSSLRequest(session);
       } else {
         const mode = this.config.clientTlsMode;
@@ -70,7 +81,7 @@ export class ConnectionHandler {
       return;
     }
 
-    const tlsOptions: Bun.TLS.Options = {};
+    const tlsOptions: any = {};
     if (this.config.clientTlsKeyFile && this.config.clientTlsCertFile) {
       tlsOptions.key = Bun.file(this.config.clientTlsKeyFile);
       tlsOptions.cert = Bun.file(this.config.clientTlsCertFile);
@@ -90,7 +101,8 @@ export class ConnectionHandler {
 
     try {
       socket.write('S');
-      socket.upgradeTLS(tlsOptions);
+      (socket as any).upgradeTLS(tlsOptions);
+      socket.flush();
       session.state = 'authenticating';
     } catch (e) {
       console.error("Failed to upgrade to TLS:", e);
@@ -98,9 +110,9 @@ export class ConnectionHandler {
     }
   }
 
-  private processData(session: ClientSession, data: Buffer): void {
+  private processData(session: ClientSession, data: Uint8Array): void {
     try {
-      const messages = this.protocol.parseClientMessage(data);
+      const messages = this.protocol.parseClientMessage(Buffer.from(data));
       for (const message of messages) {
         this.processClientMessage(session, message);
       }
@@ -216,18 +228,20 @@ export class ConnectionHandler {
       }
     }
 
-    console.log(`Proxying query: ${message.data.query}`);
+    console.log(`Proxying query (${message.data.query.length} chars)`);
     
     const queryMessage = this.protocol.createQueryMessage(message.data.query);
-    session.currentServerConnection.socket.write(queryMessage);
+    if (session.currentServerConnection.socket) {
+      session.currentServerConnection.socket.write(queryMessage);
+    }
   }
 
   private setupServerToClientProxy(session: ClientSession, serverConnection: ServerConnection): void {
     if (!serverConnection.socket) return;
 
-    (serverConnection.socket as any).data = (socket: any, data: Buffer) => {
+    (serverConnection.socket as any).data = (data: Uint8Array) => {
       try {
-        const msgs = this.protocol.parseServerMessage(data);
+        const msgs = this.protocol.parseServerMessage(Buffer.from(data));
         const hasReadyForQuery = msgs.some(m => m.type === 'ReadyForQuery');
         if (hasReadyForQuery && this.config.poolMode === 'transaction') {
           if (session.pendingRelease || !session.inTransaction) {
@@ -246,12 +260,12 @@ export class ConnectionHandler {
       }
     };
 
-    (serverConnection.socket as any).close = () => {
+    (serverConnection.socket as any).end = () => {
       console.log(`Server connection closed for ${session.user}@${session.database}`);
       session.socket.end();
     };
 
-    (serverConnection.socket as any).error = (socket: any, error: Error) => {
+    (serverConnection.socket as any).error = (error: Error) => {
       console.error('Server connection error:', error);
       session.socket.write(this.protocol.createErrorResponse('Server connection error'));
       session.socket.end();
@@ -261,7 +275,7 @@ export class ConnectionHandler {
   private startCleanupTimer(): void {
     this.cleanupTimer = setInterval(() => {
       this.cleanupIdleConnections();
-    }, 30000);
+    }, 30000) as unknown as number;
   }
 
   private cleanupIdleConnections(): void {

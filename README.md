@@ -145,6 +145,7 @@ src/
 ## Status
 
 ### ✅ Implemented
+
 - Real PostgreSQL server connections
 - PostgreSQL protocol parsing and message creation (including transaction boundary detection)
 - Bidirectional query proxying
@@ -157,6 +158,7 @@ src/
 - Standalone binary compilation
 
 ### 🚧 Roadmap
+
 - [x] Transaction-level pooling
 - [ ] Full statement-level pooling (prepared statements support)
 - [ ] Connection health checks and reconnection (basic stub)

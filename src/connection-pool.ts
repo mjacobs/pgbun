@@ -33,7 +33,7 @@ export class ConnectionPool {
     const poolKey = this.getPoolKey(database, user);
     let pool = this.pools.get(poolKey);
     
-    let connection: ServerConnection | undefined;
+    let conn: ServerConnection | undefined;
     
     if (this.config.poolMode === 'session' && sessionId) {
       const sessionKey = `${sessionId}:${poolKey}`;
@@ -51,28 +51,28 @@ export class ConnectionPool {
       this.pools.set(poolKey, pool);
     }
 
-    let connection = pool.find(conn => !conn.inUse);
+    let availableConn = pool.find(conn => !conn.inUse);
 
-    if (!connection && this.totalConnections < this.config.maxClientConnections) {
-      connection = await this.createConnection(database, user);
-      if (connection) {
-        pool.push(connection);
+    if (!availableConn && this.totalConnections < this.config.maxClientConnections) {
+      availableConn = await this.createConnection(database, user);
+      if (availableConn) {
+        pool.push(availableConn);
         this.totalConnections++;
         
         if (this.config.poolMode === 'session' && sessionId) {
           const sessionKey = `${sessionId}:${poolKey}`;
-          this.sessionTrackedConnections.set(sessionKey, connection);
+          this.sessionTrackedConnections.set(sessionKey, availableConn);
         }
       }
     }
 
-    if (connection) {
-      connection.inUse = true;
-      connection.lastUsed = new Date();
-      console.log(`Assigned connection ${connection.id} to ${user}@${database}`);
+    if (availableConn) {
+      availableConn.inUse = true;
+      availableConn.lastUsed = new Date();
+      console.log(`Assigned connection ${availableConn.id} to ${user}@${database}`);
     }
 
-    return connection;
+    return availableConn;
   }
 
   releaseConnection(connection?: ServerConnection, sessionId?: string): void {
@@ -154,12 +154,12 @@ export class ConnectionPool {
     const socket = await Bun.connect({ ...hostDetails, socket: emptyHandlers });
 
     return new Promise((resolve, reject) => {
-      socket.data = (sock: Socket, data: Buffer) => {
-        sock.data = emptyHandlers.data;
+      (socket as any).data = (data: Uint8Array) => {
+        (socket as any).data = emptyHandlers.data;
 
-        if (data.toString() === 'S') {
+        if (Buffer.from(data).toString() === 'S') {
           console.log("Server accepted SSL request. Upgrading connection...");
-          const tlsOptions: Bun.TLS.Options = {};
+          const tlsOptions: any = {};
           if (this.config.serverTlsCaFile) {
             tlsOptions.ca = Bun.file(this.config.serverTlsCaFile);
           }
@@ -174,15 +174,15 @@ export class ConnectionPool {
             tlsOptions.serverName = this.config.serverHost;
           }
           try {
-            sock.upgradeTLS(tlsOptions);
-            resolve(sock);
+            (socket as any).upgradeTLS(tlsOptions);
+            resolve(socket);
           } catch (e) {
             reject(e);
           }
-        } else if (data.toString() === 'N') {
+        } else if (Buffer.from(data).toString() === 'N') {
           if (mode === 'prefer' || mode === 'allow') {
             console.log("Server refused SSL, proceeding with non-TLS connection.");
-            resolve(sock);
+            resolve(socket);
           } else {
             reject(new Error(`Server refused SSL connection, but mode is '${mode}'`));
           }
@@ -209,10 +209,10 @@ export class ConnectionPool {
         }
       }, this.config.serverConnectTimeout);
 
-      (connection.socket as any).data = (socket: Socket, data: Buffer) => {
+      (connection.socket as any).data = (data: Uint8Array) => {
         try {
           console.log(`Received server data during auth for ${connection.id}: ${data.length} bytes`);
-          const messages = this.protocol.parseServerMessage(data);
+          const messages = this.protocol.parseServerMessage(Buffer.from(data));
           console.log(`Parsed ${messages.length} messages:`, messages.map(m => m.type));
           for (const message of messages) {
             if (message.type === 'AuthenticationOk') {
@@ -221,10 +221,10 @@ export class ConnectionPool {
               clearTimeout(authTimeout);
               
               (connection.socket as any).data = () => {};
-              (connection.socket as any).close = () => {
+              (connection.socket as any).closed = () => {
                 console.log(`Server connection ${connection.id} closed`);
               };
-              (connection.socket as any).error = (socket: Socket, error: Error) => {
+              (connection.socket as any).error = (error: Error) => {
                 console.error(`Server connection ${connection.id} error:`, error);
               };
               

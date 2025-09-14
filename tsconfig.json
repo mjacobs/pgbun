@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "noEmit": true,
     "allowImportingTsExtensions": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
@@ -14,7 +15,8 @@
     "declaration": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "lib": ["ESNext"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
