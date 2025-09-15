@@ -1,0 +1,18 @@
+FROM oven/bun:1-alpine
+
+WORKDIR /app
+
+# Install dependencies for test runner
+RUN bun add pg minimist
+
+# Optional: Install pgbench for advanced benchmarking
+RUN apk add --no-cache postgresql-client
+
+# Copy test scripts (assumes ./tests/ dir in build context)
+COPY tests/ ./tests/
+
+# Set working dir to tests for script execution
+WORKDIR /app/tests
+
+# Default to running load-test.js with sample params
+CMD ["bun", "run", "load-test.js", "--mode=session", "--concurrency=50", "--duration=30s"]

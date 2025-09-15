@@ -142,6 +142,68 @@ src/
 └── config.ts             # Configuration management
 ```
 
+## Docker Development Environment
+
+pgbun includes a self-contained Docker Compose setup for development and testing. This hermetic environment runs PostgreSQL, the pgbun proxy, and a Bun-based test runner to simulate workloads, validate pooling modes, and measure performance without external dependencies.
+
+### Prerequisites
+- Docker (v20+) and Docker Compose (v2+)
+
+### Quick Start
+1. **Prepare Environment**:
+   Copy `.env.example` to `.env` and adjust variables (e.g., `POOL_MODE=transaction`).
+
+2. **Build and Launch**:
+   ```bash
+   docker compose up -d --build
+   ```
+   - Starts PostgreSQL (with init DB/tables), pgbun (proxy on localhost:6432), and prepares test-runner.
+   - Wait ~30s for readiness; check with `docker compose ps`.
+
+3. **Run Tests**:
+   - **Load Test** (concurrent queries, metrics):
+     ```bash
+     docker compose run --rm test-runner load-test.js --mode=transaction --concurrency=100 --duration=60s --scenario=load
+     ```
+   - **Transaction Test** (boundaries, edge cases):
+     ```bash
+     docker compose run --rm test-runner transaction-test.js --mode=transaction --concurrency=20 --duration=30s --scenario=boundary
+     ```
+   - **Statement Mode Stub**:
+     ```bash
+     docker compose run --rm test-runner load-test.js --mode=statement --concurrency=50 --duration=20s
+     ```
+   - Outputs JSON metrics (e.g., reuse_efficiency_percent, avg_latency_ms) to stdout. Redirect: `> metrics.json`.
+
+4. **Hot-Reload for Development**:
+   - Edit files in `./src/`; pgbun container watches and recompiles automatically (no restart needed).
+   - Restart pgbun if config changes: `docker compose restart pgbun`.
+
+5. **Manual Testing**:
+   - Connect via psql: `psql -h localhost -p 6432 -U pgbun_user -d pgbun_test` (password: pgbun_pass).
+   - View logs: `docker compose logs -f pgbun` or `docker compose logs postgres`.
+
+6. **Teardown**:
+   ```bash
+   docker compose down -v  # Removes volumes (DB data) for clean redeploy
+   ```
+
+### Configuration
+- Env vars in `.env` control pgbun (e.g., `POOL_MODE`, timeouts).
+- Test params: `--mode` (session/transaction/statement), `--concurrency` (1-200), `--duration` (seconds), `--scenario` (load/boundary/idle/rollback/statement).
+- Metrics include: total_queries, errors, latencies, throughput_qps, reuse_efficiency_percent (estimates pooling; extend pgbun logs for precision).
+
+### Files
+- `docker-compose.yml`: Orchestrates services.
+- `Dockerfile.bun`: Builds/runs pgbun with hot-reload.
+- `Dockerfile.test`: Bun test-runner with `pg` client.
+- `docker-entrypoint-initdb.d/init.sql`: Sets up test DB/tables.
+- `tests/load-test.js` & `tests/transaction-test.js`: Parameterized scripts for workloads.
+
+For advanced benchmarking, extend with pgbench in test-runner. See [Docker docs](https://docs.docker.com/compose/) for troubleshooting.
+
+## Status
+
 ## Status
 
 ### ✅ Implemented

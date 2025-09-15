@@ -1,0 +1,25 @@
+# Multi-stage Dockerfile for pgbun: builder for production, runtime with hot-reload support
+
+# Builder stage for production build
+FROM docker.io/oven/bun:1-alpine AS builder
+WORKDIR /app
+COPY package*.json bun.lockb* ./
+RUN bun install --frozen-lockfile
+# --production=false
+COPY src/ ./src/
+COPY tsconfig*.json ./
+# Build the application (adjust script based on package.json; assumes 'build' compiles to dist/)
+RUN bun run build
+
+# Runtime stage
+FROM docker.io/oven/bun:1-alpine AS runtime
+WORKDIR /app
+# Copy built artifacts for production
+COPY --from=builder /app/dist ./dist
+# For development, we'll override with volume mount of src/
+COPY package*.json bun.lockb* ./
+RUN bun install --frozen-lockfile
+# --production=true
+EXPOSE 6432
+# Use dev command for hot-reload when src is mounted; falls back to built binary
+CMD ["sh", "-c", "if [ -d /app/src ]; then bun run dev; else ./dist/index; fi"]
