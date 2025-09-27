@@ -1,4 +1,4 @@
-# pgbun
+# 🐘 pgbun 🐇
 
 A high-performance PostgreSQL connection pool and proxy built with [Bun](https://bun.sh) and TypeScript. Inspired by [PgBouncer](https://www.pgbouncer.org/), pgbun provides efficient connection pooling for PostgreSQL databases with modern JavaScript/TypeScript tooling.
 
