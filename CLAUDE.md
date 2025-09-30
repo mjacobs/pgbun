@@ -7,29 +7,37 @@ This is a PostgreSQL connection pool and proxy built with Bun and TypeScript, in
 ## What We've Accomplished
 
 ### Foundation Complete ✅
-- **Project Structure**: Set up complete TypeScript project with Bun
-- **TCP Server**: Created server listening on port 6432 using Bun's native TCP capabilities
-- **Connection Architecture**: Designed core connection pool and proxy architecture
-- **PostgreSQL Protocol**: Implemented basic PostgreSQL wire protocol parsing
-- **Build System**: Created standalone binary compilation (98MB executable)
+- **Project Structure**: Complete TypeScript project with Bun
+- **TCP Server**: Server listening on port 6432 using Bun's native TCP capabilities
+- **Connection Architecture**: Core connection pool and proxy architecture
+- **PostgreSQL Protocol**: Complete PostgreSQL wire protocol parsing and message creation
+- **Build System**: Standalone binary compilation (98MB executable)
 
 ### Core Components Implemented
 
-1. **Entry Point** (`src/index.ts`): Main application entry with graceful shutdown handling
-2. **Server** (`src/server.ts`): TCP server managing client connections on port 6432
-3. **Configuration** (`src/config.ts`): Centralized configuration with pgbouncer-like settings
-4. **Connection Handler** (`src/connection-handler.ts`): Orchestrates client-server communication
-5. **Connection Pool** (`src/connection-pool.ts`): Manages PostgreSQL connection pools by database/user
-6. **Protocol Handler** (`src/protocol.ts`): PostgreSQL wire protocol message parsing and creation
+1. **Entry Point** (`src/index.ts`): Main application entry with CLI integration and graceful shutdown
+2. **CLI Interface** (`src/cli.ts`): Comprehensive command line interface with help, version, and configuration options
+3. **Server** (`src/server.ts`): TCP server managing client connections on port 6432
+4. **Configuration** (`src/config.ts`): Centralized configuration with file/env/CLI support and validation
+5. **Connection Handler** (`src/connection-handler.ts`): Client-server communication with session management
+6. **Connection Pool** (`src/connection-pool.ts`): PostgreSQL connection pools with SSL/TLS support
+7. **Protocol Handler** (`src/protocol.ts`): Complete PostgreSQL wire protocol implementation
 
 ### Key Features Working
 - ✅ TCP server listening on configurable port (default 6432)
-- ✅ Basic PostgreSQL protocol message parsing (startup, query, terminate)
-- ✅ Connection pooling infrastructure with session/transaction/statement modes
+- ✅ Complete PostgreSQL protocol message parsing (startup, query, terminate, SSL)
+- ✅ Connection pooling with session/transaction/statement modes
+- ✅ Transaction-level pooling with automatic release on COMMIT/ROLLBACK
+- ✅ SSL/TLS support for both client and server connections
+- ✅ Configuration file support (TOML format)
+- ✅ CLI interface with comprehensive options
+- ✅ Environment variable configuration
 - ✅ Configurable pool sizes and connection limits
+- ✅ Connection timeouts and idle cleanup
 - ✅ Graceful shutdown handling
 - ✅ Connection logging and basic statistics
 - ✅ Standalone binary compilation
+- ✅ Docker development environment with hot-reload
 
 ## Current Status
 
@@ -39,17 +47,23 @@ This is a PostgreSQL connection pool and proxy built with Bun and TypeScript, in
 - ✅ Real PostgreSQL server connections with authentication
 - ✅ Bidirectional query proxying (client ↔ server)
 - ✅ Connection pool management with actual server connections
-- ✅ Session-level connection pooling
-- ✅ Configuration system
+- ✅ Session-level connection pooling (default)
+- ✅ Transaction-level connection pooling with automatic release on COMMIT/ROLLBACK
+- ✅ Basic statement-level pooling stub (per-query assignment/release)
+- ✅ SSL/TLS support for both client and server connections
+- ✅ Configuration file support (TOML format)
+- ✅ CLI interface with comprehensive options
+- ✅ Environment variable configuration
+- ✅ Connection timeouts and idle cleanup
 - ✅ Graceful shutdown handling
+- ✅ Docker development environment with hot-reload
 
 **What's Next (Future Enhancements):**
-- Transaction-level and statement-level pooling modes
+- Full statement-level pooling (prepared statements support)
 - Connection health checks and automatic reconnection
-- Advanced configuration options and file-based config
-- Monitoring and metrics interface
-- SSL/TLS support
+- Metrics and monitoring interface
 - Multi-server load balancing
+- Admin interface and statistics
 
 ## Build and Run
 
@@ -81,15 +95,19 @@ The proxy accepts client connections, parses PostgreSQL protocol messages, manag
 3. ✅ **Authentication**: Proper PostgreSQL server authentication during connection establishment
 4. ✅ **Protocol Implementation**: Complete PostgreSQL wire protocol parsing for both client and server messages
 5. ✅ **Connection Management**: Real connection pooling with server connection lifecycle management
+6. ✅ **Transaction Pooling**: Implemented transaction-level pooling with automatic release on COMMIT/ROLLBACK
+7. ✅ **SSL/TLS Support**: Complete SSL/TLS implementation for both client and server connections
+8. ✅ **Configuration System**: CLI interface, TOML config files, and environment variable support
+9. ✅ **Docker Environment**: Full development and testing environment with hot-reload
+10. ✅ **Connection Timeouts**: PgBouncer-compatible timeout settings and idle cleanup
 
 ## Next Development Steps
 
-1. **Transaction Pooling**: Implement transaction-level connection reuse modes
+1. **Statement Pooling**: Complete statement-level pooling with prepared statements support
 2. **Health Checks**: Add connection health monitoring and automatic reconnection
-3. **Configuration File**: Support external configuration files
-4. **Monitoring**: Add detailed metrics and admin interface
-5. **SSL/TLS**: Add encrypted connection support
-6. **Multi-Server**: Support multiple PostgreSQL servers with load balancing
+3. **Monitoring**: Add detailed metrics and admin interface
+4. **Multi-Server**: Support multiple PostgreSQL servers with load balancing
+5. **Admin Interface**: Add web-based or CLI admin interface for statistics and management
 
 ## Technical Notes
 
@@ -102,10 +120,10 @@ The proxy accepts client connections, parses PostgreSQL protocol messages, manag
 
 ## Current Limitations
 
-- Transaction and statement-level pooling modes not yet implemented
-- No SSL/TLS support
-- No configuration file support
-- Limited connection health monitoring
+- Statement-level pooling is only a basic stub (per-query assignment/release)
+- No connection health checks or automatic reconnection
+- Limited observability: No metrics, monitoring, or admin interface
+- Single-server focus; no multi-database or load balancing capabilities
 - No admin interface or detailed statistics yet
 
-This is now a functional PostgreSQL connection pool and proxy that can handle real production workloads with session-level connection pooling.
+This is now a functional PostgreSQL connection pool and proxy that can handle real production workloads with session-level and transaction-level connection pooling, SSL/TLS support, and comprehensive configuration options.

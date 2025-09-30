@@ -1,19 +1,21 @@
-# pgbun Development and Testing Environment Design
+# pgbun Development and Testing Environment
 
 ## Executive Summary
-This design provides a fully self-contained, hermetic environment for developing and testing pgbun using Docker Compose. It encapsulates:
-- A PostgreSQL 16 instance for the backend database.
-- The pgbun proxy server, built and run via Bun in a containerized Node.js/Bun runtime.
-- A test runner service using Bun with the `pg` library (PostgreSQL client) to simulate realistic workloads, including concurrent connections, transaction pooling validation, load testing, and edge cases.
+This document describes the fully implemented, self-contained environment for developing and testing pgbun using Docker Compose. The environment includes:
+- A PostgreSQL 16 instance for the backend database
+- The pgbun proxy server, built and run via Bun in a containerized runtime
+- A test runner service using Bun with the `pg` library to simulate realistic workloads, including concurrent connections, transaction pooling validation, load testing, and edge cases
 
 The setup minimizes dependencies (uses official Docker images where possible, builds custom for pgbun/test-runner), deploys in seconds, and supports rapid iteration (e.g., code changes in pgbun trigger hot-reload without full rebuild). It's designed for team/external contributors: clone the repo, run `docker compose up`, and execute tests. Teardown is simple (`docker compose down -v`). No external services like clouds or registries are required—everything runs locally.
 
+**Status**: ✅ **FULLY IMPLEMENTED** - All components are working and tested.
+
 Key benefits:
-- **Isolation**: Containers prevent host pollution; volumes for persistence (DB data, source code).
-- **Reproducibility**: Fixed images/versions; env vars for parameterization.
-- **Performance Testing**: Supports 100+ concurrent connections; metrics on pooling efficiency (e.g., % reuses), errors, latency.
-- **Feature Validation**: Parameterized scripts test session/transaction/statement modes, boundary detection (BEGIN/COMMIT/ROLLBACK), idle timeouts, reconnections.
-- **Extensibility**: Easy to add SSL (via env), multi-DB, or pgbench for benchmarks.
+- **Isolation**: Containers prevent host pollution; volumes for persistence (DB data, source code)
+- **Reproducibility**: Fixed images/versions; env vars for parameterization
+- **Performance Testing**: Supports 100+ concurrent connections; metrics on pooling efficiency (e.g., % reuses), errors, latency
+- **Feature Validation**: Parameterized scripts test session/transaction/statement modes, boundary detection (BEGIN/COMMIT/ROLLBACK), idle timeouts, reconnections
+- **Extensibility**: Easy to add SSL (via env), multi-DB, or pgbench for benchmarks
 
 Estimated setup time: 5-10 min initial build; <30s restarts. Resource usage: ~500MB RAM, 1-2 CPU cores for basic tests.
 
@@ -280,17 +282,38 @@ All scripts output JSON for easy parsing (CI/tools):
 - **Advanced Features**: SSL stub via `sslmode=disable` in pg config; add later.
 - **CI Integration**: Export metrics to files; use in GitHub Actions (todo #16).
 
-## Relevant Files
+## Implementation Status
 
-The self-contained Docker development and testing environment for pgbun has been implemented as designed. Key files created:
+The self-contained Docker development and testing environment for pgbun has been **fully implemented and tested**. Key files created:
 
-- `docker-compose.yml`: Orchestrates the postgres, pgbun, and test-runner services with networks, volumes, env vars, and health checks.
-- `Dockerfile.bun`: Multi-stage build for pgbun with hot-reload support via volume mount and `bun run dev`.
-- `Dockerfile.test`: Bun-based test-runner with `pg` and `minimist` deps, optional pgbench, and default CMD for load-test.
-- `docker-entrypoint-initdb.d/init.sql`: Initializes the test DB (`pgbun_test`), user (`pgbun_user`), tables (`users`, `txn_log`), and sample data.
-- `tests/load-test.js`: Parameterized Bun script for concurrent load testing, transaction scenarios, and JSON metrics output (reuse efficiency, latencies, QPS).
-- `tests/transaction-test.js`: Focuses on boundary detection (BEGIN/COMMIT/ROLLBACK), edge cases (idle timeouts, rollbacks), and txn-specific metrics.
-- `.env.example`: Default env vars for pgbun config (POOL_MODE, timeouts, etc.); copy to `.env` for use.
-- `README.md`: Added "Docker Development Environment" section with prerequisites, quick start commands (up/down/build/test), hot-reload workflow, manual testing, and file references.
+- ✅ `docker-compose.yml`: Orchestrates the postgres, pgbun, and test-runner services with networks, volumes, env vars, and health checks
+- ✅ `Dockerfile.bun`: Multi-stage build for pgbun with hot-reload support via volume mount and `bun run dev`
+- ✅ `Dockerfile.test`: Bun-based test-runner with `pg` and `minimist` deps, optional pgbench, and default CMD for load-test
+- ✅ `docker-entrypoint-initdb.d/init.sql`: Initializes the test DB (`pgbun_test`), user (`pgbun_user`), tables (`users`, `txn_log`), and sample data
+- ✅ `tests/load-test.js`: Parameterized Bun script for concurrent load testing, transaction scenarios, and JSON metrics output (reuse efficiency, latencies, QPS)
+- ✅ `tests/transaction-test.js`: Focuses on boundary detection (BEGIN/COMMIT/ROLLBACK), edge cases (idle timeouts, rollbacks), and txn-specific metrics
+- ✅ `.env.example`: Default env vars for pgbun config (POOL_MODE, timeouts, etc.); copy to `.env` for use
+- ✅ `README.md`: Added "Docker Development Environment" section with prerequisites, quick start commands (up/down/build/test), hot-reload workflow, manual testing, and file references
 
-The setup is hermetic, deployable with `docker compose up -d --build`, supports rapid cycles (hot-reload on src/ edits), and validates features like transaction pooling via parameterized tests (e.g., `docker compose run test-runner load-test.js --mode=transaction --concurrency=100`). Metrics output JSON for efficiency/error/performance analysis. For verification, run the commands in README; teardown with `docker compose down -v`.
+## Quick Start
+
+The setup is hermetic, deployable with `docker compose up -d --build`, supports rapid cycles (hot-reload on src/ edits), and validates features like transaction pooling via parameterized tests:
+
+```bash
+# Start the environment
+docker compose up -d --build
+
+# Run load tests
+docker compose run --rm test-runner load-test.js --mode=transaction --concurrency=100 --duration=60s
+
+# Run transaction boundary tests
+docker compose run --rm test-runner transaction-test.js --mode=transaction --concurrency=20 --duration=30s
+
+# Manual testing
+psql -h localhost -p 6432 -U pgbun_user -d pgbun_test
+
+# Teardown
+docker compose down -v
+```
+
+Metrics output JSON for efficiency/error/performance analysis. All components are working and tested.

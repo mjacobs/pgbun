@@ -38,20 +38,41 @@ bun run dev  # Run with hot reload
 ### Basic Usage
 
 ```bash
+# Start with defaults
 ./pgbun
+
+# Start with custom options
+./pgbun --listen-port 6433 --pool-mode transaction --max-client-conn 200
+
+# Use configuration file
+./pgbun --config /etc/pgbun.conf
+
+# Show current configuration
+./pgbun config
+
+# Validate configuration without starting
+./pgbun --dry-run --config /etc/pgbun.conf
 ```
 
 The proxy will start listening on port 6432 and forward connections to PostgreSQL on localhost:5432.
 
 ### Configuration
 
-pgbun uses sensible defaults but can be configured for your environment:
+pgbun supports multiple configuration methods with the following precedence (highest to lowest):
+1. **CLI options** - Command line arguments
+2. **Environment variables** - System environment
+3. **Configuration file** - TOML format
+4. **Defaults** - Built-in sensible defaults
 
-- **Listen Port**: 6432 (default)
-- **PostgreSQL Server**: localhost:5432 (default)
-- **Pool Mode**: 'session' (default; options: 'session', 'transaction', 'statement')
-- **Max Connections**: 100 (default)
-- **Pool Size**: 25 (default)
+#### Default Configuration
+
+- **Listen Port**: 6432
+- **Listen Host**: 0.0.0.0
+- **PostgreSQL Server**: localhost:5432
+- **Pool Mode**: 'session' (options: 'session', 'transaction', 'statement')
+- **Max Client Connections**: 100
+- **Pool Size**: 25
+- **TLS Mode**: Client 'disable', Server 'prefer'
 
 ### Connection Timeouts
 
@@ -62,22 +83,63 @@ pgbun includes PgBouncer-compatible connection timeout settings:
 - **server_idle_timeout**: 10 minutes - Cleanup idle PostgreSQL connections after this time
 - **client_idle_timeout**: disabled - Cleanup idle client connections (0 = disabled)
 
-Example with custom timeouts:
+#### Configuration File
 
-```typescript
-import { Config, Server } from 'pgbun';
+Create a TOML configuration file (e.g., `pgbun.conf`):
 
-const config = new Config({
-  pool_mode: 'transaction',  // 'session', 'transaction', or 'statement'
-  server_connect_timeout: 5000,   // 5 seconds
-  client_login_timeout: 30000,    // 30 seconds
-  server_idle_timeout: 300000,    // 5 minutes
-  client_idle_timeout: 600000,    // 10 minutes
-});
+```toml
+[server]
+listen_port = 6432
+listen_host = "0.0.0.0"
+server_host = "localhost"
+server_port = 5432
 
-const server = new Server(config);
-await server.start();
+[pool]
+pool_mode = "transaction"
+max_client_conn = 200
+pool_size = 50
+
+[logging]
+log_connections = true
+log_disconnections = true
+stats_period = 60000
+
+[timeouts]
+server_connect_timeout = 15000
+client_login_timeout = 60000
+server_idle_timeout = 600000
+client_idle_timeout = 0
+
+[tls]
+client_tls_mode = "disable"
+server_tls_mode = "prefer"
 ```
+
+#### Environment Variables
+
+Set environment variables for configuration:
+
+```bash
+export PGBUN_LISTEN_PORT=6432
+export PGBUN_POOL_MODE=transaction
+export PGBUN_MAX_CLIENT_CONN=200
+export PGBUN_LOG_CONNECTIONS=true
+```
+
+#### CLI Options
+
+Use command line options for runtime configuration:
+
+```bash
+./pgbun --listen-port 6433 --pool-mode transaction --max-client-conn 200 --verbose
+```
+
+See `./pgbun --help` for all available options.
+
+For detailed configuration information, see:
+- [CLI Reference](CLI.md) - Complete command-line interface documentation
+- [Configuration Reference](CONFIG.md) - All configuration options and examples
+- [TLS/SSL Configuration](TLS.md) - SSL/TLS setup and security configuration
 
 ## Testing
 
@@ -134,12 +196,25 @@ bun run start      # Run built version
 
 ```
 src/
-├── index.ts              # Entry point
-├── server.ts             # TCP server
-├── connection-handler.ts # Client request handling
-├── connection-pool.ts    # Connection pool management
-├── protocol.ts           # PostgreSQL protocol parser
-└── config.ts             # Configuration management
+├── index.ts              # Entry point with CLI integration
+├── cli.ts                # Command line interface parser
+├── server.ts             # TCP server implementation
+├── connection-handler.ts # Client request handling and session management
+├── connection-pool.ts    # Connection pool management with SSL support
+├── protocol.ts           # PostgreSQL wire protocol parser
+└── config.ts             # Configuration management with file/env/CLI support
+
+tests/
+├── unit/                 # Unit tests
+├── integration/          # Integration tests
+├── load-test.js          # Load testing script
+└── transaction-test.js   # Transaction boundary testing
+
+docker/
+├── docker-compose.yml    # Development environment
+├── Dockerfile.bun       # pgbun container
+├── Dockerfile.test      # Test runner container
+└── docker-entrypoint-initdb.d/init.sql  # Test database setup
 ```
 
 ## Docker Development Environment
@@ -204,29 +279,39 @@ For advanced benchmarking, extend with pgbench in test-runner. See [Docker docs]
 
 ## Status
 
-## Status
-
 ### ✅ Implemented
 
-- Real PostgreSQL server connections
-- PostgreSQL protocol parsing and message creation (including transaction boundary detection)
-- Bidirectional query proxying
-- Connection pool management with authentication
-- Session-level connection pooling
-- Transaction-level connection pooling (with automatic release on COMMIT/ROLLBACK)
-- Basic statement-level pooling stub (per-query assignment/release)
-- Connection timeouts and limits (PgBouncer-compatible)
-- Graceful shutdown handling
-- Standalone binary compilation
+- **Core Functionality**: Real PostgreSQL server connections with bidirectional query proxying
+- **Protocol Support**: Complete PostgreSQL wire protocol parsing and message creation
+- **Connection Pooling**: 
+  - Session-level connection pooling (default)
+  - Transaction-level connection pooling with automatic release on COMMIT/ROLLBACK
+  - Basic statement-level pooling stub (per-query assignment/release)
+- **Configuration**: 
+  - CLI interface with comprehensive options
+  - Configuration file support (TOML format)
+  - Environment variable overrides
+  - Configuration validation and dry-run mode
+- **Security**: 
+  - SSL/TLS support for both client and server connections
+  - Multiple TLS modes (disable, allow, prefer, require, verify-ca, verify-full)
+- **Connection Management**: 
+  - Connection timeouts and limits (PgBouncer-compatible)
+  - Automatic idle connection cleanup
+  - Graceful shutdown handling
+- **Development**: 
+  - Standalone binary compilation (~98MB)
+  - Docker development environment with hot-reload
+  - Comprehensive test suite with load testing
 
 ### 🚧 Roadmap
 
 - [x] Transaction-level pooling
+- [x] Configuration file support  
+- [x] SSL/TLS support
 - [ ] Full statement-level pooling (prepared statements support)
-- [ ] Connection health checks and reconnection (basic stub)
+- [ ] Connection health checks and automatic reconnection
 - [ ] Metrics and monitoring interface
-- [ ] Configuration file support
-- [ ] SSL/TLS support
 - [ ] Multiple database/server support
 - [ ] Load balancing across servers
 - [ ] Admin interface and statistics
